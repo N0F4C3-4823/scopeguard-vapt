@@ -115,7 +115,11 @@ class OllamaClient:
         schema["properties"]["parameters"] = {
             "type": "object",
             "additionalProperties": False,
-            "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}},
+            "properties": {
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "timeout_profile": {"type": "string", "enum": ["protocol_retry"]},
+                "transport": {"type": "string", "enum": ["tcp", "udp"]},
+            },
         }
         response = httpx.post(
             f"{self.url}/api/generate",
@@ -138,7 +142,7 @@ class OllamaClient:
             triage.testcase_id != testcase_id
             or not set(triage.observation_ids).issubset(observation_ids)
             or triage.suggested_action_id not in allowed_actions
-            or set(triage.parameters) - {"port"}
+            or set(triage.parameters) - {"port", "timeout_profile", "transport"}
         ):
             raise ValueError("Ollama response referenced unknown testcase or observation")
         return triage

@@ -23,6 +23,7 @@ def two_line_description(
     observation_type: str,
     target: str,
     applicability: str,
+    observation_ids: tuple[str, ...] = (),
 ) -> tuple[str, str]:
     """Return exactly two evidence-bounded sentences for a finalized result."""
     if verdict not in {"FOUND", "NOT_FOUND", "NA"}:
@@ -32,9 +33,70 @@ def two_line_description(
         line1 = _sentence(f"The {condition} check requires {applicability}")
         line2 = _sentence(f"That access or capability was not part of the authorized assessment for {subject}, so this condition does not apply")
         return line1, line2
+    observation_descriptions = {
+        "live-05-no-tested-legacy-service": (
+            f"The completed legacy-service check found no tested deprecated service on {subject}",
+            "The completed service inventory contained identified services but none matched the deprecated protocols covered by this check",
+        ),
+        "live-06-auth-required": (
+            f"The LDAP directory query on {subject} required authentication before returning the tested directory information",
+            "The recorded LDAP response denied unauthenticated disclosure for this query",
+        ),
+        "live-08-modern-tls-only": (
+            f"The TLS enumeration on {subject} accepted the tested modern TLS protocols and did not list the deprecated protocols covered by this check",
+            "The completed cipher inventory supports a negative result only for those enumerated protocol versions",
+        ),
+        "live-12-no-filtered-port": (
+            f"The completed TCP state scan on {subject} found no filtered state among the ports it tested",
+            "Each reported port state was open or closed in the completed scan, so this filtering condition was not observed",
+        ),
+        "live-15-no-management-marker": (
+            f"The completed HTTP checks on {subject} returned a response without the management markers covered by this test",
+            "The recorded response supports a negative result for those tested markers and does not assess undiscovered interfaces",
+        ),
+        "live-16-share-denied": (
+            f"The SMB share check on {subject} received an access-denied or authentication-required response",
+            "That recorded response supports a negative result for unauthenticated share access in this test",
+        ),
+        "live-18-anonymous-denied": (
+            f"The FTP anonymous-login check on {subject} received an explicit denial response",
+            "The recorded FTP response supports a negative result for anonymous login in this test",
+        ),
+        "live-21-smb-signing-required": (
+            f"The SMB security check on {subject} reported signing as enabled and required",
+            "That completed protocol response supports a negative result for the tested signing weakness",
+        ),
+        "live-23-rdp-nla": (
+            f"The RDP security check on {subject} reported Network Level Authentication as supported or enabled",
+            "That completed RDP response supports a negative result for the tested absence of NLA",
+        ),
+        "live-24-redis-auth": (
+            f"The Redis probe on {subject} received an authentication-required response to the safe information request",
+            "The recorded Redis response supports a negative result for unauthenticated information access",
+        ),
+        "live-27-no-specific-version": (
+            f"The completed HTTP header check on {subject} did not disclose a specific software version",
+            "The recorded response contained no versioned product header for the disclosure condition tested",
+        ),
+        "live-33-nosniff-present": (
+            f"The completed HTTP response from {subject} included the X-Content-Type-Options nosniff header",
+            "That recorded header supports a negative result for the missing-header condition tested",
+        ),
+        "live-34-no-tested-weak-algorithm": (
+            f"The SSH algorithm enumeration on {subject} completed without listing the weak algorithms covered by this check",
+            "The captured algorithm list supports a negative result only for those enumerated weak algorithms",
+        ),
+        "live-37-vnc-auth": (
+            f"The VNC service on {subject} reported an authentication security type",
+            "That completed VNC response supports a negative result for the unauthenticated-service condition tested",
+        ),
+    }
+    for observation_id in observation_ids:
+        if observation_id in observation_descriptions:
+            return tuple(_sentence(line) for line in observation_descriptions[observation_id])  # type: ignore[return-value]
     if verdict == "NOT_FOUND":
-        line1 = _sentence(f"The completed {condition} check did not establish the tested condition on {subject}")
-        line2 = _sentence("The recorded command output supports this negative conclusion only for the tested scope and method")
+        line1 = _sentence(f"The completed {condition} check did not observe the specific condition tested on {subject}")
+        line2 = _sentence("The recorded command output supports this negative conclusion only for the completed scope and method")
         return line1, line2
 
     special = {

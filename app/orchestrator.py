@@ -25,7 +25,7 @@ from .exporter import export_assessment
 from .live_adapters import adapter_for, build_command
 from .models import AssessmentCreate
 from .ollama import OllamaClient
-from .recovery import plan_recovery
+from .recovery import plan_recovery, recovery_is_useful
 from .registry import TESTCASES
 from .scope import NormalizedTarget, parse_scope
 
@@ -508,10 +508,24 @@ class AssessmentManager:
                         controlled_fixture=target["kind"] == "fixture",
                     )
                     decision = evaluate_applicability(testcase, assessment["assessment_type"], capabilities)
+                    related_evidence_paths: tuple[str, ...] = ()
                     if decision.state == "APPLICABLE" and target["kind"] != "fixture":
+                        if testcase.id == "29" and target["kind"] == "ip" and ":" not in target["value"]:
+                            decision = replace(
+                                decision,
+                                state="NA",
+                                reason="IPv6 exposure testing requires an authorized IPv6 endpoint; the approved target is an IPv4 literal.",
+                                missing=(),
+                            )
                         gate = service_gate(testcase.id, discovery.get(target["id"])) if target["id"] in discovery else None
-                        if gate and gate[0] == "NA":
-                            decision = replace(decision, state="NA", reason=gate[1], missing=())
+                        if gate and gate[0] in {"NA", "INCONCLUSIVE"}:
+                            decision = replace(decision, state=gate[0], reason=gate[1], missing=())
+                            discovery_root = assessment_root / self._target_dir_name(target) / "discovery"
+                            related_evidence_paths = tuple(
+                                str(path.relative_to(assessment_root))
+                                for path in sorted(discovery_root.rglob("*"))
+                                if path.is_file() and not path.is_symlink()
+                            )
                     command_result: CommandResult | None = None
                     if decision.state == "APPLICABLE":
                         applicable_count += 1
@@ -557,6 +571,7 @@ class AssessmentManager:
                         observation_type=classification.observation_type,
                         target=target["label"] or target["value"],
                         applicability=classification.applicability,
+                        observation_ids=tuple(getattr(classification, "observation_ids", ())),
                     )
                     if isinstance(classification, SimpleNamespace):
                         classification.description_line_1 = description_line_1
@@ -578,6 +593,7 @@ class AssessmentManager:
                                 observation_type=classification.observation_type,
                                 target=target["label"] or target["value"],
                                 applicability=classification.applicability,
+                                observation_ids=tuple(getattr(classification, "observation_ids", ())),
                             )
                             classification = replace(classification, description_line_1=description_line_1, description_line_2=description_line_2)
                         try:
@@ -605,6 +621,7 @@ class AssessmentManager:
                                 observation_type=classification.observation_type,
                                 target=target["label"] or target["value"],
                                 applicability=classification.applicability,
+                                observation_ids=tuple(getattr(classification, "observation_ids", ())),
                             )
                             classification = replace(classification, description_line_1=description_line_1, description_line_2=description_line_2)
                             artifact = write_testcase_evidence(
@@ -631,6 +648,7 @@ class AssessmentManager:
                             missing=decision.missing,
                             description_line_1=description_line_1,
                             description_line_2=description_line_2,
+                            related_evidence_paths=related_evidence_paths,
                         )
                         if result_status == "INCONCLUSIVE":
                             error_count += 1
@@ -845,6 +863,16 @@ class AssessmentManager:
 
     def _resolve_discrepancy(self, assessment, target, testcase, command_result, classification, cancel):
         trigger = classification.failure_reason or "insufficient evidence"
+        if not recovery_is_useful(testcase_id=testcase.id, result=command_result, reason=trigger):
+            self.db.add_event(
+                assessment["id"],
+                "ai_recovery_skipped",
+                "AI Triage",
+                "No bounded alternate action is expected to improve a filtering, silence, or unsupported-predicate limitation.",
+                testcase_id=testcase.id,
+                target_id=target["id"],
+            )
+            return command_result, classification, [], []
         evidence = "\n".join(
             part for part in (
                 f"target={target['value']}",
@@ -858,57 +886,137 @@ class AssessmentManager:
         )[:6000]
         audits: list[dict[str, object]] = []
         attempts: list[CommandResult] = []
-        if not assessment["llm_enabled"]:
-            self.db.add_event(assessment["id"], "ai_recovery_skipped", "AI Triage", "Discrepancy retained because optional Local AI is disabled.", testcase_id=testcase.id, target_id=target["id"])
-            return command_result, classification, attempts, audits
-        self.db.add_event(assessment["id"], "ai_analysis_started", "AI Triage", f"Discrepancy detected for testcase {testcase.id}; analyzing the captured evidence.", testcase_id=testcase.id, target_id=target["id"])
+        fallback_action = "run_approved_alternative_probe" if testcase.id == "40" else "retry_safe_probe"
+        fallback_parameters: dict[str, object] = (
+            {"transport": "tcp"}
+            if fallback_action == "run_approved_alternative_probe"
+            else {"timeout_profile": "protocol_retry"}
+        )
+        suggested_action_id: str | None = None
+        suggested_parameters: dict[str, object] = {}
         response_payload: dict[str, object] = {}
-        action_id = None
-        validation_state = "REJECTED"
-        outcome = "AI_UNAVAILABLE"
-        try:
-            cache_key = sha256_bytes(evidence.encode("utf-8", errors="replace"))
-            triage = self._ai_cache.get(cache_key)
-            if triage is None:
-                triage = self.ollama.triage(
-                    testcase_id=testcase.id,
-                    observation_ids=list(getattr(classification, "observation_ids", ())),
-                    evidence=evidence,
-                )
-                self._ai_cache[cache_key] = triage
-            response_payload = triage.model_dump()
-            action_id = triage.suggested_action_id
-            validation_state = "VALIDATED"
-            outcome = "ANALYZED"
-            self.db.add_event(assessment["id"], "ai_cause_identified", "AI Triage", "Local AI returned a schema-validated discrepancy explanation; deterministic status remains authoritative.", testcase_id=testcase.id, target_id=target["id"])
-        except Exception as error:
-            response_payload = {"error_type": type(error).__name__, "error": str(error)[:240]}
-            self.db.add_event(assessment["id"], "ai_analysis_failed", "AI Triage", "Local AI was unavailable or returned invalid output; captured evidence was preserved.", testcase_id=testcase.id, target_id=target["id"], payload=response_payload)
+        validation_state = "FALLBACK_VALIDATED"
+        outcome = "DETERMINISTIC_FALLBACK"
+        if assessment["llm_enabled"]:
+            self.db.add_event(assessment["id"], "ai_analysis_started", "AI Triage", f"Discrepancy detected for testcase {testcase.id}; analyzing the captured evidence.", testcase_id=testcase.id, target_id=target["id"])
+            try:
+                cache_key = sha256_bytes(evidence.encode("utf-8", errors="replace"))
+                triage = self._ai_cache.get(cache_key)
+                if triage is None:
+                    triage = self.ollama.triage(
+                        testcase_id=testcase.id,
+                        observation_ids=list(getattr(classification, "observation_ids", ())),
+                        evidence=evidence,
+                    )
+                    self._ai_cache[cache_key] = triage
+                response_payload = triage.model_dump()
+                suggested_action_id = triage.suggested_action_id
+                suggested_parameters = dict(triage.parameters)
+                validation_state = "MODEL_VALIDATED"
+                outcome = "ANALYZED"
+                self.db.add_event(assessment["id"], "ai_cause_identified", "AI Triage", "Local AI returned a schema-validated discrepancy explanation; deterministic status remains authoritative.", testcase_id=testcase.id, target_id=target["id"])
+            except Exception as error:
+                response_payload = {"error_type": type(error).__name__, "error": str(error)[:240]}
+                self.db.add_event(assessment["id"], "ai_analysis_failed", "AI Triage", "Local AI was unavailable or returned invalid output; a deterministic safe fallback will be considered.", testcase_id=testcase.id, target_id=target["id"], payload=response_payload)
+        else:
+            self.db.add_event(assessment["id"], "ai_recovery_skipped", "AI Triage", "Optional Local AI is disabled; deterministic bounded recovery remains available.", testcase_id=testcase.id, target_id=target["id"])
+        action_id = suggested_action_id or fallback_action
+        parameters = suggested_parameters or fallback_parameters
         plan = plan_recovery(
             action_id=action_id,
             testcase_id=testcase.id,
             target=target["value"],
             settings=self.settings,
             attempt=0,
-            parameters=dict(getattr(triage, "parameters", {})) if "triage" in locals() else None,
+            parameters=parameters,
         )
-        if plan.argv:
-            self.db.add_event(assessment["id"], "ai_corrective_check_selected", "AI Triage", plan.reason, testcase_id=testcase.id, target_id=target["id"])
+        if plan.action_id is None and suggested_action_id is not None:
+            validation_state = "REJECTED"
+            self.db.add_event(
+                assessment["id"],
+                "ai_action_rejected",
+                "AI Triage",
+                f"Rejected the model's recovery action: {plan.reason}.",
+                testcase_id=testcase.id,
+                target_id=target["id"],
+            )
+            action_id = fallback_action
+            parameters = fallback_parameters
+            plan = plan_recovery(
+                action_id=action_id,
+                testcase_id=testcase.id,
+                target=target["value"],
+                settings=self.settings,
+                attempt=0,
+                parameters=parameters,
+            )
+        if plan.action_id is not None and validation_state != "REJECTED":
+            validation_state = "VALIDATED"
+        if plan.argv or plan.action_id in {"reparse_raw_output", "inspect_existing_evidence"}:
+            self.db.add_event(
+                assessment["id"],
+                "ai_corrective_check_selected",
+                "AI Triage",
+                plan.reason,
+                testcase_id=testcase.id,
+                target_id=target["id"],
+                payload={"action_id": plan.action_id, "parameters": parameters},
+            )
             if cancel.is_set():
                 return command_result, classification, attempts, audits
-            self.db.add_event(assessment["id"], "ai_corrective_check_started", "AI Triage", "Running the approved non-destructive corrective check.", testcase_id=testcase.id, target_id=target["id"])
+            self.db.add_event(
+                assessment["id"],
+                "ai_corrective_check_started",
+                "AI Triage",
+                "Running the approved non-destructive corrective check.",
+                testcase_id=testcase.id,
+                target_id=target["id"],
+            )
             if command_result is not None:
                 attempts.append(command_result)
-            retry_result = self._execute_target(target, testcase.id, cancel, recovery=True)
-            attempts.append(retry_result)
-            retry_classification = self._classify(testcase, retry_result, live=True)
+            retry_result: CommandResult | None = None
+            if plan.argv:
+                retry_result = self._run_argv(
+                    plan.argv,
+                    plan.timeout_seconds or self.settings.live_command_timeout,
+                )
+                attempts.append(retry_result)
+                retry_classification = self._classify(
+                    testcase,
+                    retry_result,
+                    live=target["kind"] != "fixture",
+                )
+            elif plan.action_id == "reparse_raw_output" and command_result is not None:
+                retry_result = command_result
+                retry_classification = self._classify(
+                    testcase,
+                    command_result,
+                    live=target["kind"] != "fixture",
+                )
+            else:
+                retry_classification = classification
             outcome = "RECOVERY_SUCCEEDED" if retry_classification.final_verdict else "RECOVERY_EXHAUSTED"
             if retry_classification.final_verdict:
                 classification = retry_classification
-                command_result = retry_result
-                self.db.add_event(assessment["id"], "ai_recovery_succeeded", "AI Triage", "A bounded corrective check produced evidence sufficient for deterministic verification.", testcase_id=testcase.id, target_id=target["id"])
+                if retry_result is not None:
+                    command_result = retry_result
+                self.db.add_event(
+                    assessment["id"],
+                    "ai_recovery_succeeded",
+                    "AI Triage",
+                    "A bounded corrective check produced evidence sufficient for deterministic verification.",
+                    testcase_id=testcase.id,
+                    target_id=target["id"],
+                )
             else:
-                self.db.add_event(assessment["id"], "ai_recovery_exhausted", "AI Triage", "The bounded corrective check did not establish a final verdict; the result remains unresolved.", testcase_id=testcase.id, target_id=target["id"])
+                self.db.add_event(
+                    assessment["id"],
+                    "ai_recovery_exhausted",
+                    "AI Triage",
+                    "The bounded corrective check did not establish a final verdict; the result remains unresolved.",
+                    testcase_id=testcase.id,
+                    target_id=target["id"],
+                )
         audits.append({
             "assessment_id": assessment["id"],
             "target_id": target["id"],

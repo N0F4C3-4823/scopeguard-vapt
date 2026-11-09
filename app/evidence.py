@@ -229,6 +229,7 @@ def write_applicability_evidence(
     missing: tuple[str, ...] = (),
     description_line_1: str = "",
     description_line_2: str = "",
+    related_evidence_paths: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     testcase_dir = assessment_root / target_dir_name / "testcases" / (
         f"{testcase.id}_{safe_name(testcase.condition)}"
@@ -237,6 +238,13 @@ def write_applicability_evidence(
     (testcase_dir / "POCs" / "FOUND").mkdir(parents=True, exist_ok=True)
     (testcase_dir / "POCs" / "NOT_FOUND").mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    for relative in related_evidence_paths:
+        relative_path = Path(relative)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError(f"Unsafe related evidence path: {relative}")
+        path = assessment_root / relative_path
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"Missing related evidence path: {relative}")
     payload = {
         "testcase_id": testcase.id,
         "condition": testcase.condition,
@@ -252,6 +260,7 @@ def write_applicability_evidence(
         "target_id": target_id,
         "target": target_value,
         "command_executed": False,
+        "related_evidence_paths": list(related_evidence_paths),
     }
     path = evidence_dir / "applicability.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -262,7 +271,7 @@ def write_applicability_evidence(
     )
     return {
         "root": testcase_dir,
-        "evidence_paths": [str(path.relative_to(assessment_root))],
+        "evidence_paths": [str(path.relative_to(assessment_root))] + list(related_evidence_paths),
         "poc_paths": [],
         "hashes": {"applicability_sha256": sha256_bytes(path.read_bytes())},
         "commands": payload,

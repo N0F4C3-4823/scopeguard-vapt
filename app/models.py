@@ -189,6 +189,7 @@ class AssessmentDetail(AssessmentModel):
 
 
 class TriageModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     testcase_id: str
     observation_ids: list[str]
     interpretation: str
@@ -197,3 +198,20 @@ class TriageModel(BaseModel):
     explanation: str
     limitations: list[str] = Field(default_factory=list)
     requires_additional_evidence: bool = False
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_triage_parameters(cls, value: dict[str, Any]) -> dict[str, Any]:
+        allowed = {"port", "timeout_profile", "transport"}
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"Unsupported triage parameter(s): {', '.join(sorted(unknown))}")
+        if "port" in value:
+            port = value["port"]
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("Triage port must be an integer between 1 and 65535")
+        if value.get("timeout_profile") not in {None, "protocol_retry"}:
+            raise ValueError("Unsupported triage timeout profile")
+        if value.get("transport") not in {None, "tcp", "udp"}:
+            raise ValueError("Unsupported triage transport")
+        return value

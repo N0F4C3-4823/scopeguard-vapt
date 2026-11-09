@@ -83,7 +83,7 @@ def test_discovery_parser_preserves_protocol_and_requires_nmap_completion():
     assert "completion" in failure
 
 
-def test_service_gate_never_turns_filtered_or_missing_state_into_na():
+def test_service_gate_preserves_filtered_tcp_as_inconclusive():
     closed = DiscoverySnapshot(
         target="127.0.0.1",
         tcp=(PortObservation(23, "tcp", "closed", "telnet"),),
@@ -104,7 +104,10 @@ def test_service_gate_never_turns_filtered_or_missing_state_into_na():
         udp_complete=False,
         host_state="HOST_INDETERMINATE",
     )
-    assert service_gate("10", filtered) is None
+    assert service_gate("10", filtered) == (
+        "INCONCLUSIVE",
+        "The complete TCP discovery scan showed filtering on every required service port; the application-layer condition could not be tested from this vantage point",
+    )
     assert service_gate("10", closed) is not None
 
 

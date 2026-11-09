@@ -155,7 +155,7 @@ _CONTROLLED_VALIDATION: dict[str, tuple[str, ...]] = {
     "12": ("closed/open tested ports -> NOT_FOUND for filtering; filtered state -> FOUND",),
     "13": ("SNMP public response -> FOUND; denied/malformed response -> INCONCLUSIVE",),
     "14": ("capability-only; no Layer-2 sensor",),
-    "15": ("management-title HTTP response -> FOUND; non-management response -> INCONCLUSIVE",),
+    "15": ("management-title HTTP response -> FOUND; complete non-management response -> NOT_FOUND",),
     "16": ("SMB share service -> FOUND/NOT_FOUND only with real SMB evidence; no SMB -> NA",),
     "17": ("SNMP version response -> INCONCLUSIVE observation",),
     "18": ("anonymous FTP read -> FOUND; explicit anonymous denial -> NOT_FOUND",),
@@ -247,6 +247,7 @@ def build_command(
     tcp_connect_timeout_seconds: int = 5,
     protocol_timeout_seconds: int = 15,
     nmap_script_timeout_seconds: int = 30,
+    dns_transport: str | None = None,
 ) -> list[str] | None:
     """Build one explicit argv for a testcase; never interpolate a shell command."""
     adapter = adapter_for(testcase_id)
@@ -321,6 +322,7 @@ def build_command(
         return [
             sys.executable, "-m", "app.protocol_probe", "redis-info",
             "--target", target, "--port", str(ports.get("6379", 6379)),
+            "--timeout", str(max(1, int(protocol_timeout_seconds))),
         ]
     if testcase_id == "25":
         return nmap(target, str(ports.get("1433", 1433)), scripts=("ms-sql-info",))
@@ -347,7 +349,20 @@ def build_command(
     if testcase_id == "38":
         return ["nmap", "-sn", "-PE", "-PP", "-PM", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "40":
-        return ["dig", f"+time={max(1, int(protocol_timeout_seconds))}", "+tries=1", "+noall", "+answer", f"@{target}", ".", "NS"]
+        transport = dns_transport or "udp"
+        if transport not in {"tcp", "udp"}:
+            raise ValueError(f"Unsupported DNS transport: {transport}")
+        return [
+            "dig",
+            f"+time={max(1, int(protocol_timeout_seconds))}",
+            "+tries=1",
+            "+noall",
+            "+answer",
+            *(["+tcp"] if transport == "tcp" else []),
+            f"@{target}",
+            ".",
+            "NS",
+        ]
     raise ValueError(f"No command builder for testcase {testcase_id}")
 
 
@@ -531,6 +546,21 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
         if absent:
             return absent
         identified = [service for _port, _protocol, state, service in states if state == "open" and service and service.lower() not in {"unknown", "tcpwrapped"}]
+        if testcase_id == "04":
+            database_services = re.compile(
+                r"mysql|mariadb|postgres(?:ql)?|mongodb|mongod|redis|ms[- ]?sql|mssql|oracle|cassandra|elasticsearch|memcached",
+                re.IGNORECASE,
+            )
+            identified = [service for service in identified if database_services.search(service)]
+            if complete and not identified:
+                return LiveParse(
+                    "NA",
+                    "No database service was identified in the completed service scan",
+                    "The completed service inventory did not identify a supported database endpoint",
+                    ("live-04-no-database-service",),
+                    "informational",
+                    "APPLICABILITY_CONFIRMED",
+                )
         if testcase_id == "05" and any(re.search(r"telnet|tftp|rlogin|rsh|ftp", service, re.I) for service in identified):
             return LiveParse("FOUND", "applicable", None, ("live-05-legacy-service",), "medium", "VALIDATED")
         if testcase_id == "05" and complete and identified:
@@ -575,6 +605,15 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return absent
         if re.search(r"admin|console|management|dashboard", lower):
             return LiveParse("FOUND", "applicable", None, ("live-15-management-marker",), "medium", "VALIDATED")
+        if complete and any(state == "open" and protocol == "tcp" for _port, protocol, state, _service in states):
+            return LiveParse(
+                "NOT_FOUND",
+                "applicable",
+                None,
+                ("live-15-no-management-marker",),
+                "informational",
+                "VALIDATED",
+            )
         return _inconclusive("HTTP service was observed without a validated management interface marker")
     if testcase_id == "16":
         absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))

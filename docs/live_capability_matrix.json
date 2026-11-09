@@ -463,7 +463,7 @@
       "condition": "Management_Interface",
       "verification_logic": "Management exposure is reported only for an observed management marker in an actual HTTP response; no credential attack occurs.",
       "controlled_validation": [
-        "management-title HTTP response -> FOUND; non-management response -> INCONCLUSIVE"
+        "management-title HTTP response -> FOUND; complete non-management response -> NOT_FOUND"
       ]
     },
     {

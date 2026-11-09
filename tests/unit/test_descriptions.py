@@ -26,3 +26,19 @@ def test_unresolved_descriptions_are_empty_and_not_presented_as_verdicts():
         target="controlled-service",
         applicability="an applicable TLS service",
     ) == ("", "")
+
+
+def test_negative_description_is_specific_when_parser_proves_the_condition():
+    first, second = two_line_description(
+        testcase_id="33",
+        testcase_name="HTTP/HTTPS services",
+        condition="missing HTTP security header",
+        verdict="NOT_FOUND",
+        observation_type="misconfiguration",
+        target="local fixture",
+        applicability="an HTTP response",
+        observation_ids=("live-33-nosniff-present",),
+    )
+    assert "X-Content-Type-Options nosniff" in first
+    assert "missing-header" in second
+    assert validate_two_line_description(first, second)

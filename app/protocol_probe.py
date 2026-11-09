@@ -12,10 +12,10 @@ import socket
 import sys
 
 
-def redis_info(target: str, port: int) -> int:
+def redis_info(target: str, port: int, timeout: float) -> int:
     request = b"*1\r\n$4\r\nINFO\r\n"
-    with socket.create_connection((target, port), timeout=3) as connection:
-        connection.settimeout(3)
+    with socket.create_connection((target, port), timeout=timeout) as connection:
+        connection.settimeout(timeout)
         connection.sendall(request)
         chunks: list[bytes] = []
         while True:
@@ -39,9 +39,10 @@ def main() -> int:
     redis_parser = subparsers.add_parser("redis-info")
     redis_parser.add_argument("--target", required=True)
     redis_parser.add_argument("--port", required=True, type=int)
+    redis_parser.add_argument("--timeout", type=float, default=3.0)
     args = parser.parse_args()
     if args.operation == "redis-info":
-        return redis_info(args.target, args.port)
+        return redis_info(args.target, args.port, max(0.1, min(args.timeout, 60.0)))
     return 2
 
 

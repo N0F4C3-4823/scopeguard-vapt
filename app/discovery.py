@@ -190,14 +190,18 @@ _UDP_REQUIRED: dict[str, tuple[int, ...]] = {
     "40": (53,),
 }
 _GENERIC_TCP = {"02", "04", "05", "11", "22"}
+_TCP_FILTER_BLOCK = {
+    "06", "10", "15", "16", "18", "20", "21", "23", "24", "25", "27", "33", "34", "36", "37", "39",
+}
 
 
 def service_gate(testcase_id: str, snapshot: DiscoverySnapshot) -> tuple[str, str] | None:
-    """Return an applicability override only for explicit complete TCP closures.
+    """Return an applicability/coverage override from complete discovery.
 
-    A filtered, open|filtered, missing, failed or timed-out observation never
-    becomes NA.  Returning ``None`` leaves the service-specific adapter free to
-    collect the best protocol evidence it can.
+    Explicitly closed required ports are NA.  When every required TCP port is
+    filtered, the application-layer condition is blocked from this vantage
+    point, so it is INCONCLUSIVE rather than being probed repeatedly.  Missing,
+    failed, or timed-out observations never become NA.
     """
     if testcase_id in _GENERIC_TCP:
         if not snapshot.tcp_complete:
@@ -216,6 +220,13 @@ def service_gate(testcase_id: str, snapshot: DiscoverySnapshot) -> tuple[str, st
             return None
         if all(observations[port].state == "closed" for port in required_tcp):
             return "NA", f"The complete TCP discovery scan explicitly closed the required service ports: {', '.join(map(str, required_tcp))}"
+        if testcase_id in _TCP_FILTER_BLOCK and all(
+            observations[port].state in {"filtered", "open|filtered"} for port in required_tcp
+        ):
+            return (
+                "INCONCLUSIVE",
+                "The complete TCP discovery scan showed filtering on every required service port; the application-layer condition could not be tested from this vantage point",
+            )
         return None
     if required_udp:
         if not snapshot.udp_complete:

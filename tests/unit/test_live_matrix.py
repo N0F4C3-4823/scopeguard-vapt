@@ -39,6 +39,20 @@ def test_live_nmap_host_timeout_is_configurable():
     assert command[command.index("--host-timeout") + 1] == "19s"
 
 
+def test_dns_alternative_recovery_uses_tcp_transport():
+    command = build_command("40", "127.0.0.1", dns_transport="tcp", protocol_timeout_seconds=7)
+    assert command is not None
+    assert "+tcp" in command
+    assert "+time=7" in command
+
+
+def test_redis_probe_receives_configured_protocol_timeout():
+    command = build_command("24", "127.0.0.1", protocol_timeout_seconds=11)
+    assert command is not None
+    assert "--timeout" in command
+    assert command[command.index("--timeout") + 1] == "11"
+
+
 def _nmap_result(text: str) -> CommandResult:
     return CommandResult(
         id="parser-test",
@@ -73,3 +87,26 @@ def test_tool_exit_codes_are_explained_without_negative_verdicts():
     assert parse_live_result("27", curl).status == "INCONCLUSIVE"
     assert "curl exited 28" in (parse_live_result("27", curl).reason or "")
     assert "dig exited 9" in (parse_live_result("40", dns).reason or "")
+
+
+def test_database_inventory_does_not_treat_http_as_database_applicability():
+    result = _nmap_result(
+        "Nmap scan report for 127.0.0.1\n"
+        "80/tcp open http nginx\n"
+        "Nmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n"
+    )
+    parsed = parse_live_result("04", result)
+    assert parsed.status == "NA"
+    assert parsed.observation_ids == ("live-04-no-database-service",)
+
+
+def test_management_surface_has_a_completed_negative_predicate():
+    result = _nmap_result(
+        "Nmap scan report for 127.0.0.1\n"
+        "80/tcp open http\n"
+        "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nhello\n"
+        "Nmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n"
+    )
+    parsed = parse_live_result("15", result)
+    assert parsed.status == "NOT_FOUND"
+    assert parsed.observation_ids == ("live-15-no-management-marker",)

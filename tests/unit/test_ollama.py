@@ -87,3 +87,26 @@ def test_ollama_fails_closed_when_memory_is_below_threshold(monkeypatch):
     assert status.ready is False
     with pytest.raises(RuntimeError, match="below the safe inference threshold"):
         client.triage(testcase_id="08", observation_ids=[], evidence="captured")
+
+
+def test_ollama_rejects_unknown_recovery_parameters(monkeypatch):
+    client = OllamaClient("http://127.0.0.1:11434", "qwen2.5:1.5b-instruct")
+    monkeypatch.setattr(ollama_module, "available_memory_bytes", lambda: 2_000 * 1024 * 1024)
+    monkeypatch.setattr(ollama_module.httpx, "get", lambda url, timeout: _tags())
+    invalid = {
+        "testcase_id": "10",
+        "observation_ids": [],
+        "interpretation": "The supplied command timed out.",
+        "suggested_action_id": "retry_safe_probe",
+        "parameters": {"shell": "echo unsafe"},
+        "explanation": "Unsupported action parameters.",
+        "limitations": [],
+        "requires_additional_evidence": True,
+    }
+    monkeypatch.setattr(
+        ollama_module.httpx,
+        "post",
+        lambda *args, **kwargs: FakeResponse({"response": json.dumps(invalid)}),
+    )
+    with pytest.raises(ValueError):
+        client.triage(testcase_id="10", observation_ids=[], evidence="captured")

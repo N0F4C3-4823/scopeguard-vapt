@@ -397,7 +397,8 @@ def test_controlled_http_positive_negative_and_malformed_conditions():
         result, classification = execute("33", **{"80": port})
         assert classification.status == "NOT_FOUND"
         result, classification = execute("15", **{"80": port})
-        assert classification.status == "INCONCLUSIVE"
+        assert classification.status == "NOT_FOUND"
+        assert "live-15-no-management-marker" in classification.observation_ids
 
         HttpHandler.mode = "malformed"
         result, classification = execute("27", **{"80": port})

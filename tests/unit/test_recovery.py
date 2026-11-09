@@ -6,7 +6,7 @@ from pathlib import Path
 from app.classifier import Classification
 from app.commands import CommandResult
 from app.models import TriageModel
-from app.recovery import plan_recovery
+from app.recovery import plan_recovery, recovery_is_useful
 from app.registry import TESTCASE_BY_ID
 
 
@@ -57,7 +57,7 @@ def test_discrepancy_invokes_ollama_and_accepts_only_bounded_recovery(manager, m
             b"Nmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n"
         ),
     )
-    monkeypatch.setattr(manager, "_execute_target", lambda *_args, **_kwargs: recovered)
+    monkeypatch.setattr(manager, "_run_argv", lambda *_args, **_kwargs: recovered)
     assessment = {"id": "assessment-test", "llm_enabled": 1}
     target = {"id": "target-test", "value": "127.0.0.1", "label": "loopback", "kind": "live", "host_count": 1}
 
@@ -83,3 +83,50 @@ def test_recovery_registry_rejects_arbitrary_actions(settings):
     )
     assert plan.argv is None
     assert "approved recovery registry" in plan.reason
+
+
+def test_invalid_model_recovery_action_is_rejected_before_fallback(manager, monkeypatch):
+    testcase = TESTCASE_BY_ID["10"]
+    initial = _result(status="TIMEOUT", timed_out=True)
+    classification = Classification(
+        "INCONCLUSIVE", "applicable", (testcase.condition,), (), (), (testcase.condition,),
+        "unknown", "bounded command timeout", (), "INCOMPLETE",
+        final_verdict=None, coverage_status="FAILED", coverage_reason="bounded command timeout",
+    )
+    events: list[str] = []
+    monkeypatch.setattr(manager.db, "add_event", lambda _a, event, *_args, **_kwargs: events.append(event) or 1)
+    monkeypatch.setattr(
+        manager.ollama,
+        "triage",
+        lambda **_kwargs: TriageModel(
+            testcase_id="10",
+            observation_ids=[],
+            interpretation="The registered banner action is not valid for Telnet.",
+            suggested_action_id="collect_safe_banner",
+            explanation="Use the testcase-specific retry instead.",
+        ),
+    )
+    recovered = _result(
+        status="COMPLETED",
+        stdout=b"Nmap scan report for 127.0.0.1\n23/tcp open telnet\nNmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n",
+    )
+    monkeypatch.setattr(manager, "_run_argv", lambda *_args, **_kwargs: recovered)
+    command, final, _attempts, audits = manager._resolve_discrepancy(
+        {"id": "assessment-test", "llm_enabled": 1},
+        {"id": "target-test", "value": "127.0.0.1", "label": "loopback", "kind": "live", "host_count": 1},
+        testcase,
+        initial,
+        classification,
+        threading.Event(),
+    )
+    assert command is recovered
+    assert final.final_verdict == "FOUND"
+    assert "ai_action_rejected" in events
+    assert audits[0]["validation_state"] == "REJECTED"
+
+
+def test_recovery_skips_repeated_filtering_but_allows_timeout_retry():
+    filtered = _result(status="COMPLETED", stdout=b"23/tcp filtered telnet\n")
+    timeout = _result(status="TIMEOUT", timed_out=True)
+    assert recovery_is_useful(testcase_id="10", result=filtered, reason="TCP filtering prevented applicability") is False
+    assert recovery_is_useful(testcase_id="10", result=timeout, reason="bounded command timeout") is True
