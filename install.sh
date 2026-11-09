@@ -158,13 +158,19 @@ ollama_models_dir() {
   if [[ "$configured" = /* ]]; then printf '%s\n' "$configured"; else printf '%s\n' "$ROOT_DIR/$configured"; fi
 }
 
+ollama_cpu_library() {
+  if grep -qm1 'avx2' /proc/cpuinfo 2>/dev/null; then printf '%s\n' 'cpu_avx2'; else printf '%s\n' 'cpu'; fi
+}
+
 start_ollama() {
   local binary="$1"
   if ollama_health; then return 0; fi
   mkdir -p "$(ollama_models_dir)" "$ROOT_DIR/data/logs"
   OLLAMA_HOST="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}" \
     OLLAMA_MODELS="$(ollama_models_dir)" \
-    OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 "$binary" serve >"$ROOT_DIR/data/logs/ollama-install.log" 2>&1 &
+    OLLAMA_LLM_LIBRARY="${SCOPEGUARD_OLLAMA_LLM_LIBRARY:-$(ollama_cpu_library)}" \
+    OLLAMA_CONTEXT_LENGTH=2048 OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 \
+    OLLAMA_MAX_QUEUE=2 OLLAMA_NO_CLOUD=1 "$binary" serve >"$ROOT_DIR/data/logs/ollama-install.log" 2>&1 &
   OLLAMA_PID=$!
   OLLAMA_STARTED=1
   for _ in $(seq 1 60); do ollama_health && return 0; sleep 0.5; done
