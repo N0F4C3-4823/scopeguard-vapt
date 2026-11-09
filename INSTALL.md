@@ -11,7 +11,7 @@ cd scopeguard-vapt
 ./start.sh
 ~~~
 
-The installer is idempotent. It creates .venv, installs the exact runtime pins in requirements.txt, installs the editable package, creates .env from .env.example, initializes the database, and runs the registry self-test. It does not silently install system packages.
+The installer is idempotent. It creates .venv, installs the exact runtime pins in requirements.txt, installs the editable package, creates .env from .env.example, initializes the database, and runs the registry self-test. It asks before installing system packages. A complete installation also installs or detects Ollama, downloads `qwen2.5:1.5b-instruct`, starts the local API, and performs a real ScopeGuard structured-inference check; it fails closed if any of those required AI checks fail.
 
 ## System dependencies
 
@@ -46,9 +46,9 @@ The browser suite requires a running application and the connected Playwright br
 SCOPEGUARD_E2E=1 SCOPEGUARD_BASE_URL=http://127.0.0.1:8001 .venv/bin/pytest -q tests/e2e/test_gui_smoke.py
 ~~~
 
-## Ollama
+## Ollama and Qwen
 
-Ollama is optional and remains local-only. On x86_64 and arm64 Linux, the installer can download the official project-local runtime after explicit approval:
+Ollama remains local-only. On x86_64 and arm64 Linux, the complete installer downloads the official project-local runtime after explicit approval when it is not already available:
 
 ~~~bash
 SCOPEGUARD_INSTALL_OLLAMA=1 \
@@ -56,9 +56,15 @@ SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 \
 ./install.sh
 ~~~
 
-The default model is qwen2.5:1.5b-instruct. The installer starts a temporary local server, pulls the model into data/ollama, and performs a real API inference check. It does not expose Ollama beyond localhost. Large models are not supported by the recommended low-memory profile.
+The default model is `qwen2.5:1.5b-instruct`. The installer starts a temporary local server, reuses or pulls the model into `data/ollama`, performs a raw inference check, then performs ScopeGuard's real schema/evidence-reference AI self-test. CPU-only settings limit concurrency and loaded models. It does not expose Ollama beyond localhost. Large models are not supported by the recommended low-memory profile.
 
-If AI is not installed, start ScopeGuard normally. The rest of the assessment engine remains available; AI status and limitations are visible in Settings.
+If AI cannot be installed, use the explicit limited path:
+
+~~~bash
+SCOPEGUARD_LIMITED_MODE=1 ./install.sh
+~~~
+
+Limited mode is clearly reported and the rest of the deterministic assessment engine remains available; it must not be confused with a complete AI-ready installation. A later `SCOPEGUARD_INSTALL_OLLAMA=1 SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 ./install.sh` resumes the complete path without deleting assessment data.
 
 ## Startup and shutdown
 

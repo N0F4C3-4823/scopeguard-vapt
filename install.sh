@@ -6,6 +6,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 OLLAMA_MODEL="${SCOPEGUARD_OLLAMA_MODEL:-qwen2.5:1.5b-instruct}"
 OLLAMA_PID=""
 OLLAMA_STARTED=0
+LIMITED_MODE="${SCOPEGUARD_LIMITED_MODE:-0}"
 
 say() { printf '[ScopeGuard] %s\n' "$*"; }
 warn() { printf '[ScopeGuard] WARNING: %s\n' "$*" >&2; }
@@ -119,6 +120,11 @@ check_optional_tools() {
 }
 
 ollama_binary() {
+  local configured="${SCOPEGUARD_OLLAMA_BIN:-}"
+  if [ -n "$configured" ]; then
+    if [[ "$configured" != /* ]]; then configured="$ROOT_DIR/$configured"; fi
+    if [ -x "$configured" ]; then printf '%s\n' "$configured"; return 0; fi
+  fi
   if [ -x "$ROOT_DIR/.tools/ollama/bin/ollama" ]; then printf '%s\n' "$ROOT_DIR/.tools/ollama/bin/ollama"
   else command -v ollama 2>/dev/null || true
   fi
@@ -147,12 +153,17 @@ ollama_health() {
   curl --fail --silent --show-error --max-time 2 "${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1
 }
 
+ollama_models_dir() {
+  local configured="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}"
+  if [[ "$configured" = /* ]]; then printf '%s\n' "$configured"; else printf '%s\n' "$ROOT_DIR/$configured"; fi
+}
+
 start_ollama() {
   local binary="$1"
   if ollama_health; then return 0; fi
-  mkdir -p "${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" "$ROOT_DIR/data/logs"
+  mkdir -p "$(ollama_models_dir)" "$ROOT_DIR/data/logs"
   OLLAMA_HOST="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}" \
-    OLLAMA_MODELS="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" \
+    OLLAMA_MODELS="$(ollama_models_dir)" \
     OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 "$binary" serve >"$ROOT_DIR/data/logs/ollama-install.log" 2>&1 &
   OLLAMA_PID=$!
   OLLAMA_STARTED=1
@@ -174,39 +185,79 @@ PY
 prepare_ollama() {
   local binary
   binary="$(ollama_binary)"
+  if [ "$LIMITED_MODE" = 1 ]; then
+    if [ "${SCOPEGUARD_INSTALL_OLLAMA:-0}" = 1 ] || [ "${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ]; then
+      die "SCOPEGUARD_LIMITED_MODE=1 conflicts with explicit Ollama installation flags."
+    fi
+    warn "Limited installation requested: Ollama and Qwen will not be installed or verified."
+    return 0
+  fi
   if [ -z "$binary" ] && { [ "${SCOPEGUARD_INSTALL_OLLAMA:-0}" = 1 ] || [ "${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ]; }; then
     install_local_ollama
     binary="$(ollama_binary)"
-  elif [ -z "$binary" ] && interactive && confirm "Install project-local Ollama for optional local AI?"; then
+  elif [ -z "$binary" ] && interactive && confirm "Install project-local Ollama and configure local AI now?"; then
     install_local_ollama
     binary="$(ollama_binary)"
   fi
-  if [ -z "$binary" ]; then warn "Ollama is not installed; continuing without optional local AI."; return 0; fi
-  say "Ollama runtime: $binary"
-  if [ "${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ] || { interactive && confirm "Download $OLLAMA_MODEL?"; }; then
-    start_ollama "$binary"
-    say "Pulling model $OLLAMA_MODEL."
-    OLLAMA_MODELS="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" "$binary" pull "$OLLAMA_MODEL"
-    verify_ollama_model "$OLLAMA_MODEL"
+  if [ -z "$binary" ]; then
+    die "Ollama is required for a complete installation. Approve local AI setup, or explicitly choose limited mode with SCOPEGUARD_LIMITED_MODE=1."
   fi
+  say "Ollama runtime: $binary"
+  start_ollama "$binary"
+  if ! MODEL="$OLLAMA_MODEL" URL="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" "$PYTHON_BIN" - <<'PY'
+import json, os, urllib.request
+with urllib.request.urlopen(os.environ["URL"], timeout=5) as response:
+    names = {item.get("name", "") for item in json.load(response).get("models", [])}
+if os.environ["MODEL"] not in names:
+    raise SystemExit(1)
+PY
+  then
+    if [ "${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ] || { interactive && confirm "Download $OLLAMA_MODEL now?"; }; then
+      say "Pulling model $OLLAMA_MODEL."
+      OLLAMA_MODELS="$(ollama_models_dir)" "$binary" pull "$OLLAMA_MODEL"
+    else
+      die "The exact Qwen model $OLLAMA_MODEL is missing. Approve the model download or choose explicit limited mode."
+    fi
+  fi
+  if ! verify_ollama_model "$OLLAMA_MODEL"; then
+    die "The Ollama model did not pass inference validation; inspect data/logs/ollama-install.log."
+  fi
+}
+
+prepare_scopeguard_ai() {
+  [ "$LIMITED_MODE" = 1 ] && return 0
+  say "Verifying ScopeGuard's structured local-AI integration with a real inference request."
+  SCOPEGUARD_OLLAMA_URL="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}" \
+    SCOPEGUARD_OLLAMA_MODEL="$OLLAMA_MODEL" \
+    "$ROOT_DIR/.venv/bin/python" -m app.cli ai-self-test
+}
+
+install_python_environment() {
+  if [ ! -d "$ROOT_DIR/.venv" ]; then
+    say "Creating isolated Python environment."
+    "$PYTHON_BIN" -m venv "$ROOT_DIR/.venv"
+  fi
+  source "$ROOT_DIR/.venv/bin/activate"
+  python -m pip install --upgrade pip
+  python -m pip install --requirement "$ROOT_DIR/requirements.txt"
+  if [ "${SCOPEGUARD_INSTALL_DEV:-0}" = 1 ]; then python -m pip install --requirement "$ROOT_DIR/requirements-dev.txt"; fi
+  python -m pip install --no-deps --editable "$ROOT_DIR"
 }
 
 detect_platform
 print_environment
 ensure_python
 check_optional_tools
+install_python_environment
 prepare_ollama
-
-if [ ! -d "$ROOT_DIR/.venv" ]; then
-  say "Creating isolated Python environment."
-  "$PYTHON_BIN" -m venv "$ROOT_DIR/.venv"
-fi
-source "$ROOT_DIR/.venv/bin/activate"
-python -m pip install --upgrade pip
-python -m pip install --requirement "$ROOT_DIR/requirements.txt"
-if [ "${SCOPEGUARD_INSTALL_DEV:-0}" = 1 ]; then python -m pip install --requirement "$ROOT_DIR/requirements-dev.txt"; fi
-python -m pip install --no-deps --editable "$ROOT_DIR"
+prepare_scopeguard_ai
 mkdir -p "$ROOT_DIR/data"
 if [ ! -f "$ROOT_DIR/.env" ]; then cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"; fi
 python -m app.cli self-test
-say "Installation completed. Start with ./start.sh"
+if [ "$LIMITED_MODE" = 1 ]; then
+  say "Installation completed in LIMITED MODE without Ollama/Qwen."
+  say "To complete local-AI setup later: SCOPEGUARD_INSTALL_OLLAMA=1 SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 ./install.sh"
+else
+  say "Installation Successful: Ollama, Qwen, ScopeGuard AI integration, dependencies, and self-tests passed."
+fi
+say "Start with ./start.sh"

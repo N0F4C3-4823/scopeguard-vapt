@@ -50,6 +50,11 @@ ollama_health() {
   command -v curl >/dev/null 2>&1 && curl --fail --silent --max-time 1 "$OLLAMA_URL/api/tags" >/dev/null 2>&1
 }
 
+ollama_models_dir() {
+  local configured="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}"
+  if [[ "$configured" = /* ]]; then echo "$configured"; else echo "$ROOT_DIR/$configured"; fi
+}
+
 cleanup() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill -TERM "$SERVER_PID" 2>/dev/null || true
@@ -68,8 +73,8 @@ if health_check 2>/dev/null; then
 fi
 
 if [ -n "$OLLAMA_BIN" ] && [ -x "$OLLAMA_BIN" ] && ! ollama_health; then
-  mkdir -p "${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}"
-  OLLAMA_HOST="$OLLAMA_URL" OLLAMA_MODELS="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" \
+  mkdir -p "$(ollama_models_dir)"
+  OLLAMA_HOST="$OLLAMA_URL" OLLAMA_MODELS="$(ollama_models_dir)" \
     OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 "$OLLAMA_BIN" serve >"$ROOT_DIR/data/logs/ollama.log" 2>&1 &
   OLLAMA_PID=$!
   for _ in $(seq 1 60); do ollama_health && break; sleep 0.5; done
@@ -78,6 +83,18 @@ if [ -n "$OLLAMA_BIN" ] && [ -x "$OLLAMA_BIN" ] && ! ollama_health; then
     kill -TERM "$OLLAMA_PID" 2>/dev/null || true
     wait "$OLLAMA_PID" 2>/dev/null || true
     OLLAMA_PID=""
+  fi
+fi
+
+if [ -n "$OLLAMA_BIN" ] && [ -x "$OLLAMA_BIN" ] && ollama_health; then
+  if ! OLLAMA_URL="$OLLAMA_URL" OLLAMA_MODEL="${SCOPEGUARD_OLLAMA_MODEL:-qwen2.5:1.5b-instruct}" python - <<'PY'
+import json, os, urllib.request
+with urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=2) as response:
+    names = {item.get("name", "") for item in json.load(response).get("models", [])}
+raise SystemExit(0 if os.environ["OLLAMA_MODEL"] in names else 1)
+PY
+  then
+    echo "Ollama is reachable but the configured Qwen model is unavailable; local AI will remain disabled." >&2
   fi
 fi
 

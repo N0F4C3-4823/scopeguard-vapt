@@ -110,3 +110,35 @@ def test_ollama_rejects_unknown_recovery_parameters(monkeypatch):
     )
     with pytest.raises(ValueError):
         client.triage(testcase_id="10", observation_ids=[], evidence="captured")
+
+
+def test_timeout_triage_requires_the_allowlisted_retry_in_schema(monkeypatch):
+    client = OllamaClient("http://127.0.0.1:11434", "qwen2.5:1.5b-instruct")
+    monkeypatch.setattr(ollama_module, "available_memory_bytes", lambda: 2_000 * 1024 * 1024)
+    monkeypatch.setattr(ollama_module.httpx, "get", lambda url, timeout: _tags())
+    valid = {
+        "testcase_id": "10",
+        "observation_ids": ["exec-timeout"],
+        "interpretation": "The approved retry is supported by the timeout evidence.",
+        "suggested_action_id": "retry_safe_probe",
+        "parameters": {"timeout_profile": "protocol_retry"},
+        "explanation": "A bounded retry may collect a complete response.",
+        "limitations": [],
+        "requires_additional_evidence": True,
+    }
+    captured = {}
+
+    def post(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse({"response": json.dumps(valid)})
+
+    monkeypatch.setattr(ollama_module.httpx, "post", post)
+    result = client.triage(
+        testcase_id="10",
+        observation_ids=["exec-timeout"],
+        evidence="execution_status=TIMEOUT\nfailure_reason=bounded command timeout",
+    )
+    assert result.suggested_action_id == "retry_safe_probe"
+    schema = captured["json"]["format"]
+    assert schema["properties"]["suggested_action_id"]["enum"] == ["retry_safe_probe"]
+    assert "suggested_action_id" in schema["required"]

@@ -59,15 +59,21 @@ Node.js is not required at runtime because the frontend is shipped as static ass
 
 ## Local AI
 
-Ollama is optional. The installer can download an official project-local runtime and model after explicit approval:
+The normal interactive installer prepares local AI as part of a complete installation. It asks before system changes or downloads, installs an official project-local Ollama runtime when needed, downloads the exact model, and performs a real ScopeGuard schema check:
 
 ~~~bash
-SCOPEGUARD_INSTALL_OLLAMA=1 \
-SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 \
 ./install.sh
 ~~~
 
-The default model is qwen2.5:1.5b-instruct. New GUI assessments enable bounded AI discrepancy diagnosis by default; the operator can disable it before starting. When a timeout, parse failure, contradictory observation, or insufficient evidence is detected, ScopeGuard sends only the relevant persisted evidence to Ollama and accepts recommendations only from the typed safe-action registry. Recovery uses protocol-specific timeout budgets, a maximum of three changed attempts, and no identical-command loops. ScopeGuard limits Ollama to one loaded model and one request at a time. The installer verifies the local API and performs a real inference request. If RAM is insufficient, Ollama is unavailable, or the model is missing, deterministic assessment execution continues and the limitation is recorded.
+The default model is `qwen2.5:1.5b-instruct`. New GUI assessments enable bounded AI discrepancy diagnosis by default; the operator can disable it before starting. When a timeout, parse failure, contradictory observation, or insufficient evidence is detected, ScopeGuard sends only the relevant persisted evidence to Ollama and accepts recommendations only from the typed safe-action registry. Recovery uses protocol-specific timeout budgets, a maximum of three changed attempts, and no identical-command loops. ScopeGuard limits Ollama to one loaded model and one request at a time. A complete installation fails closed if the runtime, exact model, or real structured inference check fails.
+
+For an explicitly AI-free installation, use limited mode; it is reported separately and does not claim complete local-AI setup:
+
+~~~bash
+SCOPEGUARD_LIMITED_MODE=1 ./install.sh
+~~~
+
+The installer can also resume or enforce the AI path non-interactively with `SCOPEGUARD_INSTALL_OLLAMA=1 SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 ./install.sh`.
 
 After startup, Settings → Local AI can run the application-level schema and evidence-reference health test. AI output is stored as triage metadata and recovery audit history; it cannot create, remove, or reclassify a finding, execute arbitrary commands, or expand scope.
 

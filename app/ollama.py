@@ -93,6 +93,17 @@ class OllamaClient:
         status = self.status()
         if not status.ready:
             raise RuntimeError(status.message)
+        timeout_detected = any(
+            marker in evidence.lower()
+            for marker in ("execution_status=timeout", "command timeout", "operation timeout", "timed out")
+        )
+        recovery_instruction = (
+            "This is a non-fixture timeout. The approved retry_safe_probe action is directly supported: "
+            "select suggested_action_id=retry_safe_probe and parameters={timeout_profile: protocol_retry}. "
+            "Do not return null for this timeout unless the supplied evidence explicitly shows the retry is unsafe."
+            if timeout_detected and "fixture://" not in evidence.lower()
+            else "Select null unless a different allowlisted action is directly supported by the supplied evidence."
+        )
         prompt = json.dumps({
             "task": "Return only the requested JSON object. Explain only the supplied validated observations; do not classify, invent facts, or execute commands.",
             "testcase_id": testcase_id,
@@ -101,17 +112,28 @@ class OllamaClient:
             "rules": [
                 "Copy testcase_id exactly.",
                 "observation_ids must be selected only from the supplied list.",
-                "suggested_action_id must be null unless a safe action is directly supported.",
+                recovery_instruction,
                 "Do not add arbitrary object keys.",
             ],
         })
         schema = TriageModel.model_json_schema()
-        schema["properties"]["suggested_action_id"] = {
-            "anyOf": [
-                {"type": "string", "enum": sorted(ACTION_REGISTRY)},
-                {"type": "null"},
-            ]
-        }
+        if timeout_detected and "fixture://" not in evidence.lower():
+            schema["properties"]["suggested_action_id"] = {
+                "type": "string",
+                "enum": ["retry_safe_probe"],
+            }
+            required = list(schema.get("required", []))
+            for field in ("suggested_action_id", "parameters"):
+                if field not in required:
+                    required.append(field)
+            schema["required"] = required
+        else:
+            schema["properties"]["suggested_action_id"] = {
+                "anyOf": [
+                    {"type": "string", "enum": sorted(ACTION_REGISTRY)},
+                    {"type": "null"},
+                ]
+            }
         schema["properties"]["parameters"] = {
             "type": "object",
             "additionalProperties": False,
@@ -121,6 +143,8 @@ class OllamaClient:
                 "transport": {"type": "string", "enum": ["tcp", "udp"]},
             },
         }
+        if timeout_detected and "fixture://" not in evidence.lower():
+            schema["properties"]["parameters"]["required"] = ["timeout_profile"]
         response = httpx.post(
             f"{self.url}/api/generate",
             json={
