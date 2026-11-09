@@ -5,7 +5,7 @@
 The supported workflow is a local Linux checkout:
 
 ~~~bash
-git clone https://github.com/OWNER/scopeguard-vapt.git
+git clone https://github.com/N0F4C3-4823/scopeguard-vapt.git
 cd scopeguard-vapt
 ./install.sh
 ./start.sh

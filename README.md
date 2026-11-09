@@ -7,7 +7,7 @@ This beta release is designed for Linux and Kali/WSL while remaining honest abou
 ## Quick installation
 
 ~~~bash
-git clone https://github.com/OWNER/scopeguard-vapt.git
+git clone https://github.com/N0F4C3-4823/scopeguard-vapt.git
 cd scopeguard-vapt
 chmod +x install.sh start.sh
 ./install.sh
@@ -16,7 +16,7 @@ chmod +x install.sh start.sh
 
 Open http://127.0.0.1:8000. The control plane binds to localhost by default. Use ./start.sh --port 8001 for another local port.
 
-The OWNER placeholder is replaced with the actual private repository owner after publication. Do not run assessments until the targets are explicitly authorized.
+The repository is private to the authenticated owner. Do not run assessments until the targets are explicitly authorized.
 
 ## What is included
 
