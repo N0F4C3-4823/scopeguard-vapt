@@ -88,6 +88,7 @@ def write_testcase_evidence(
     target_id: str,
     fixture_id: str | None,
     create_screenshots: bool = True,
+    recovery_attempts: list[CommandResult] | None = None,
 ) -> dict[str, Any]:
     testcase_dir = assessment_root / target_dir_name / "testcases" / (
         f"{testcase.id}_{safe_name(testcase.condition)}"
@@ -129,9 +130,39 @@ def write_testcase_evidence(
         "combined_sha256": sha256_bytes(command_result.combined_output),
     }
     (evidence_dir / "hashes.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
+    supplemental_paths: list[str] = []
+    for index, attempt in enumerate(recovery_attempts or (), start=1):
+        attempt_dir = evidence_dir / f"recovery_attempt_{index:03d}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        attempt_stdout = attempt_dir / "stdout.bin"
+        attempt_stderr = attempt_dir / "stderr.bin"
+        attempt_stdout.write_bytes(attempt.stdout)
+        attempt_stderr.write_bytes(attempt.stderr)
+        (attempt_dir / "commands.json").write_text(
+            json.dumps(
+                {
+                    "command_id": attempt.id,
+                    "argv": list(attempt.argv),
+                    "displayed_command": attempt.displayed_command,
+                    "exit_code": attempt.exit_code,
+                    "timed_out": attempt.timed_out,
+                    "execution_status": attempt.status,
+                    "stdout_sha256": attempt.stdout_sha256,
+                    "stderr_sha256": attempt.stderr_sha256,
+                    "combined_sha256": attempt.combined_sha256,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        supplemental_paths.extend(
+            str(path.relative_to(assessment_root))
+            for path in (attempt_stdout, attempt_stderr, attempt_dir / "commands.json")
+        )
     poc_paths: list[str] = []
-    if classification.status in {"FOUND", "NOT_FOUND"} and create_screenshots:
-        parent = found_dir if classification.status == "FOUND" else not_found_dir
+    final_verdict = getattr(classification, "final_verdict", None)
+    if final_verdict in {"FOUND", "NOT_FOUND"} and create_screenshots:
+        parent = found_dir if final_verdict == "FOUND" else not_found_dir
         condition_dir = parent / safe_name(testcase.condition)
         pages = render_poc_pngs(
             command_result.displayed_command,
@@ -145,12 +176,18 @@ def write_testcase_evidence(
         stderr_path,
         evidence_dir / "commands.json",
         evidence_dir / "hashes.json",
-    )]
+    )] + supplemental_paths
     result_payload = {
         "testcase_id": testcase.id,
         "testcase_name": testcase.name,
         "condition": testcase.condition,
         "status": classification.status,
+        "final_verdict": getattr(classification, "final_verdict", None),
+        "coverage_status": getattr(classification, "coverage_status", "COMPLETED"),
+        "coverage_reason": getattr(classification, "coverage_reason", None),
+        "observation_type": getattr(classification, "observation_type", "vulnerability"),
+        "description_line_1": getattr(classification, "description_line_1", ""),
+        "description_line_2": getattr(classification, "description_line_2", ""),
         "applicability": classification.applicability,
         "command_id": command_result.id,
         "evidence_paths": evidence_paths,
@@ -190,6 +227,8 @@ def write_applicability_evidence(
     state: str,
     reason: str,
     missing: tuple[str, ...] = (),
+    description_line_1: str = "",
+    description_line_2: str = "",
 ) -> dict[str, Any]:
     testcase_dir = assessment_root / target_dir_name / "testcases" / (
         f"{testcase.id}_{safe_name(testcase.condition)}"
@@ -202,6 +241,11 @@ def write_applicability_evidence(
         "testcase_id": testcase.id,
         "condition": testcase.condition,
         "status": "NA" if state == "NA" else "INCONCLUSIVE",
+        "final_verdict": "NA" if state == "NA" else None,
+        "coverage_status": "COMPLETED" if state == "NA" else "BLOCKED",
+        "coverage_reason": reason,
+        "description_line_1": description_line_1,
+        "description_line_2": description_line_2,
         "applicability_state": state,
         "reason": reason,
         "missing": list(missing),

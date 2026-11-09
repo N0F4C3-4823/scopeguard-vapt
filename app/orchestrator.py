@@ -6,17 +6,20 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 
 from .applicability import ASSESSMENT_TYPES, evaluate_applicability, snapshot_for
 from .commands import CommandResult, run_command, sha256_bytes
 from .config import Settings
 from .db import Database, now_iso
+from .descriptions import two_line_description
 from .evidence import safe_name, write_applicability_evidence, write_testcase_evidence
 from .exporter import export_assessment
 from .live_adapters import adapter_for, build_command
 from .models import AssessmentCreate
 from .ollama import OllamaClient
+from .recovery import plan_recovery
 from .registry import TESTCASES
 from .scope import NormalizedTarget, parse_scope
 
@@ -197,6 +200,55 @@ class AssessmentManager:
         if not self.db.delete_assessment(assessment_id):
             raise ValueError("Assessment was already deleted")
 
+    def request_delete(self, assessment_id: str) -> str:
+        """Cancel an active run or delete a terminal run.
+
+        Scope and authorization are never edited as part of this operation. An
+        active job is only removed after its cancellation checkpoint reaches a
+        terminal state and the caller retries the deletion.
+        """
+        assessment = self.db.get_assessment(assessment_id)
+        if not assessment:
+            raise ValueError("Assessment not found")
+        if assessment.get("status") in {"QUEUED", "RUNNING", "PAUSED"}:
+            self.cancel(assessment_id)
+            self.db.add_event(
+                assessment_id,
+                "assessment_delete_requested",
+                "Recovery",
+                "Deletion requested; the active assessment will be removed after safe cancellation.",
+                status="CANCELLING",
+            )
+            return "cancellation_requested"
+        self.delete(assessment_id)
+        return "deleted"
+
+    def edit_metadata(self, assessment_id: str, *, name: str | None = None, client_name: str | None = None, description: str | None = None) -> dict:
+        assessment = self.db.get_assessment(assessment_id)
+        if not assessment:
+            raise ValueError("Assessment not found")
+        fields = {
+            key: value.strip() if isinstance(value, str) else value
+            for key, value in {
+                "name": name,
+                "client_name": client_name,
+                "description": description,
+            }.items()
+            if value is not None
+        }
+        if not fields:
+            return assessment
+        if "name" in fields and not fields["name"]:
+            raise ValueError("Assessment name cannot be blank")
+        self.db.update_assessment(assessment_id, **fields)
+        self.db.add_event(
+            assessment_id,
+            "assessment_metadata_updated",
+            "Scope Validation",
+            "Assessment metadata was updated; authorized scope and execution settings remain unchanged.",
+        )
+        return self.db.get_assessment(assessment_id) or assessment
+
     def pause(self, assessment_id: str) -> None:
         event = self._pause.get(assessment_id)
         if not event:
@@ -277,17 +329,6 @@ class AssessmentManager:
                         applicable_count += 1
                         command_result = self._execute_target(target, testcase.id, cancel)
                         classification = self._classify(testcase, command_result, live=target["kind"] != "fixture")
-                        artifact = write_testcase_evidence(
-                            assessment_root,
-                            self._target_dir_name(target),
-                            testcase,
-                            command_result,
-                            classification,
-                            target_value=target["value"],
-                            target_id=target["id"],
-                            fixture_id=target["value"] if target["kind"] == "fixture" else None,
-                            create_screenshots=bool(assessment["evidence_screenshots"]),
-                        )
                     else:
                         result_status = "NA" if decision.state == "NA" else "INCONCLUSIVE"
                         classification = SimpleNamespace(
@@ -300,7 +341,58 @@ class AssessmentManager:
                             severity="unknown" if result_status == "INCONCLUSIVE" else "informational",
                             failure_reason=decision.reason,
                             validation_state="APPLICABILITY_LIMITATION" if result_status == "INCONCLUSIVE" else "APPLICABILITY_CONFIRMED",
+                            final_verdict="NA" if result_status == "NA" else None,
+                            coverage_status="COMPLETED" if result_status == "NA" else "BLOCKED",
+                            coverage_reason=decision.reason,
+                            observation_type="coverage",
+                            reportable_finding=False,
                         )
+                    recovery_attempts: list[CommandResult] = []
+                    recovery_audits: list[dict[str, object]] = []
+                    if (
+                        decision.state == "APPLICABLE"
+                        and classification.status == "INCONCLUSIVE"
+                    ):
+                        command_result, classification, recovery_attempts, recovery_audits = self._resolve_discrepancy(
+                            assessment,
+                            target,
+                            testcase,
+                            command_result,
+                            classification,
+                            cancel,
+                        )
+                    description_line_1, description_line_2 = two_line_description(
+                        testcase_id=testcase.id,
+                        testcase_name=testcase.name,
+                        condition=testcase.condition,
+                        verdict=classification.final_verdict,
+                        observation_type=classification.observation_type,
+                        target=target["label"] or target["value"],
+                        applicability=classification.applicability,
+                    )
+                    if isinstance(classification, SimpleNamespace):
+                        classification.description_line_1 = description_line_1
+                        classification.description_line_2 = description_line_2
+                    else:
+                        classification = replace(
+                            classification,
+                            description_line_1=description_line_1,
+                            description_line_2=description_line_2,
+                        )
+                    if decision.state == "APPLICABLE":
+                        artifact = write_testcase_evidence(
+                            assessment_root,
+                            self._target_dir_name(target),
+                            testcase,
+                            command_result,
+                            classification,
+                            target_value=target["value"],
+                            target_id=target["id"],
+                            fixture_id=target["value"] if target["kind"] == "fixture" else None,
+                            create_screenshots=bool(assessment["evidence_screenshots"]),
+                            recovery_attempts=recovery_attempts,
+                        )
+                    else:
                         artifact = write_applicability_evidence(
                             assessment_root,
                             self._target_dir_name(target),
@@ -310,10 +402,12 @@ class AssessmentManager:
                             state=decision.state,
                             reason=decision.reason,
                             missing=decision.missing,
+                            description_line_1=description_line_1,
+                            description_line_2=description_line_2,
                         )
                         if result_status == "INCONCLUSIVE":
                             error_count += 1
-                    finding_ids = [f"finding-{assessment_id}-{target['id']}-{testcase.id}"] if classification.status == "FOUND" else []
+                    finding_ids = [f"finding-{assessment_id}-{target['id']}-{testcase.id}"] if classification.reportable_finding else []
                     evidence_id = f"evidence-{command_result.id if command_result else uuid.uuid4().hex[:12]}"
                     result_row = {
                         "assessment_id": assessment_id,
@@ -323,6 +417,13 @@ class AssessmentManager:
                         "testcase_id": testcase.id,
                         "testcase_name": testcase.name,
                         "status": classification.status,
+                        "final_verdict": classification.final_verdict,
+                        "coverage_status": classification.coverage_status,
+                        "coverage_reason": classification.coverage_reason,
+                        "observation_type": classification.observation_type,
+                        "reportable_finding": int(classification.reportable_finding),
+                        "description_line_1": description_line_1,
+                        "description_line_2": description_line_2,
                         "applicability": classification.applicability,
                         "conditions_tested_json": list(classification.conditions_tested),
                         "conditions_confirmed_json": list(classification.conditions_confirmed),
@@ -341,20 +442,8 @@ class AssessmentManager:
                         "created_at": now_iso(),
                     }
                     result_id = self.db.add_result(result_row)
-                    if assessment["llm_enabled"] and classification.status == "INCONCLUSIVE":
-                        pending_triage.append(
-                            (
-                                result_id,
-                                testcase.id,
-                                list(getattr(classification, "observation_ids", ())),
-                                "\n".join(
-                                    part for part in (
-                                        classification.failure_reason or "",
-                                        command_result.combined_output.decode("utf-8", errors="replace") if command_result else "",
-                                    ) if part
-                                )[:6000],
-                            )
-                        )
+                    for audit in recovery_audits:
+                        self.db.add_ai_recovery({**audit, "result_id": result_id})
                     if command_result is not None:
                         self.db.add_execution({
                             "id": command_result.id,
@@ -376,6 +465,38 @@ class AssessmentManager:
                             "combined_sha256": command_result.combined_sha256,
                             "execution_status": command_result.status,
                         })
+                    if recovery_attempts:
+                        recovery_root = (
+                            assessment_root
+                            / self._target_dir_name(target)
+                            / "testcases"
+                            / f"{testcase.id}_{safe_name(testcase.condition)}"
+                            / "evidence"
+                        )
+                        for attempt_index, attempt in enumerate(recovery_attempts, start=1):
+                            if command_result is not None and attempt.id == command_result.id:
+                                continue
+                            attempt_root = recovery_root / f"recovery_attempt_{attempt_index:03d}"
+                            self.db.add_execution({
+                                "id": attempt.id,
+                                "assessment_id": assessment_id,
+                                "target_id": target["id"],
+                                "testcase_id": testcase.id,
+                                "command_json": json.dumps(list(attempt.argv)),
+                                "displayed_command": attempt.displayed_command,
+                                "cwd": attempt.cwd,
+                                "started_at": attempt.started_at,
+                                "ended_at": attempt.ended_at,
+                                "exit_code": attempt.exit_code,
+                                "timed_out": int(attempt.timed_out),
+                                "tool_version": attempt.tool_version,
+                                "stdout_path": str((attempt_root / "stdout.bin").relative_to(assessment_root)),
+                                "stderr_path": str((attempt_root / "stderr.bin").relative_to(assessment_root)),
+                                "stdout_sha256": attempt.stdout_sha256,
+                                "stderr_sha256": attempt.stderr_sha256,
+                                "combined_sha256": attempt.combined_sha256,
+                                "execution_status": attempt.status,
+                            })
                     for relative in artifact["evidence_paths"] + artifact["poc_paths"]:
                         artifact_path = assessment_root / relative
                         self.db.add_evidence({
@@ -464,7 +585,18 @@ class AssessmentManager:
             self.db.update_assessment(assessment_id, status="FAILED", completed_at=now_iso(), current_phase="Failed")
             self.db.add_event(assessment_id, "assessment_failed", "Failed", f"Assessment stopped: {error}", payload={"error_type": type(error).__name__})
 
-    def _execute_target(self, target: dict, testcase_id: str, cancel: threading.Event) -> CommandResult:
+    def _run_argv(self, argv: list[str], timeout: float) -> CommandResult:
+        with self._command_metrics_lock:
+            self.active_commands += 1
+            self.max_active_commands = max(self.max_active_commands, self.active_commands)
+            self.executed_commands += 1
+        try:
+            return run_command(argv, timeout_seconds=timeout, cwd=self.settings.root_dir)
+        finally:
+            with self._command_metrics_lock:
+                self.active_commands -= 1
+
+    def _execute_target(self, target: dict, testcase_id: str, cancel: threading.Event, *, recovery: bool = False) -> CommandResult:
         target_obj = NormalizedTarget(target["id"], target["value"], target["label"], target["kind"], target["host_count"])
         if target_obj.kind == "fixture":
             scenario = target_obj.value.split("://", 1)[1]
@@ -472,11 +604,15 @@ class AssessmentManager:
             timeout = 0.35 if scenario == "timeout" else 4.0
         else:
             adapter = adapter_for(testcase_id)
+            multiplier = 2 if recovery else 1
             argv = build_command(
                 testcase_id,
                 target_obj.value,
-                nmap_host_timeout_seconds=self.settings.scanner_host_timeout_seconds,
-                nmap_max_retries=self.settings.scanner_max_retries,
+                nmap_host_timeout_seconds=min(self.settings.scanner_host_timeout_seconds * multiplier, 120),
+                nmap_max_retries=min(self.settings.scanner_max_retries + (1 if recovery else 0), 5),
+                tcp_connect_timeout_seconds=min(self.settings.tcp_connect_timeout_seconds * multiplier, 15),
+                protocol_timeout_seconds=min(self.settings.protocol_timeout_seconds * multiplier, 30),
+                nmap_script_timeout_seconds=min(self.settings.nmap_script_timeout_seconds * multiplier, 60),
             )
             if argv is None:
                 # Capability-only checks remain explicitly incomplete when the
@@ -493,16 +629,84 @@ class AssessmentManager:
                 ]
             timeout = self.settings.live_command_timeout if adapter.live_status == "LIVE" else self.settings.live_limited_command_timeout
             if argv and argv[0].rsplit("/", 1)[-1] == "nmap":
-                timeout = max(timeout, self.settings.scanner_host_timeout_seconds + self.settings.scanner_command_grace_seconds)
-        with self._command_metrics_lock:
-            self.active_commands += 1
-            self.max_active_commands = max(self.max_active_commands, self.active_commands)
-            self.executed_commands += 1
+                timeout = max(timeout, self.settings.scanner_host_timeout_seconds * multiplier + self.settings.scanner_command_grace_seconds)
+            timeout *= multiplier
+        return self._run_argv(argv, timeout)
+
+    def _resolve_discrepancy(self, assessment, target, testcase, command_result, classification, cancel):
+        trigger = classification.failure_reason or "insufficient evidence"
+        evidence = "\n".join(
+            part for part in (
+                f"target={target['value']}",
+                f"testcase={testcase.id} {testcase.name}",
+                f"command={command_result.displayed_command if command_result else 'none'}",
+                f"exit_code={command_result.exit_code if command_result else None}",
+                f"execution_status={command_result.status if command_result else 'not executed'}",
+                f"failure_reason={trigger}",
+                command_result.combined_output.decode("utf-8", errors="replace") if command_result else "",
+            ) if part
+        )[:6000]
+        audits: list[dict[str, object]] = []
+        attempts: list[CommandResult] = []
+        if not assessment["llm_enabled"]:
+            self.db.add_event(assessment["id"], "ai_recovery_skipped", "AI Triage", "Discrepancy retained because optional Local AI is disabled.", testcase_id=testcase.id, target_id=target["id"])
+            return command_result, classification, attempts, audits
+        self.db.add_event(assessment["id"], "ai_analysis_started", "AI Triage", f"Discrepancy detected for testcase {testcase.id}; analyzing the captured evidence.", testcase_id=testcase.id, target_id=target["id"])
+        response_payload: dict[str, object] = {}
+        action_id = None
+        validation_state = "REJECTED"
+        outcome = "AI_UNAVAILABLE"
         try:
-            return run_command(argv, timeout_seconds=timeout, cwd=self.settings.root_dir)
-        finally:
-            with self._command_metrics_lock:
-                self.active_commands -= 1
+            triage = self.ollama.triage(
+                testcase_id=testcase.id,
+                observation_ids=list(getattr(classification, "observation_ids", ())),
+                evidence=evidence,
+            )
+            response_payload = triage.model_dump()
+            action_id = triage.suggested_action_id
+            validation_state = "VALIDATED"
+            outcome = "ANALYZED"
+            self.db.add_event(assessment["id"], "ai_cause_identified", "AI Triage", "Local AI returned a schema-validated discrepancy explanation; deterministic status remains authoritative.", testcase_id=testcase.id, target_id=target["id"])
+        except Exception as error:
+            response_payload = {"error_type": type(error).__name__, "error": str(error)[:240]}
+            self.db.add_event(assessment["id"], "ai_analysis_failed", "AI Triage", "Local AI was unavailable or returned invalid output; captured evidence was preserved.", testcase_id=testcase.id, target_id=target["id"], payload=response_payload)
+        plan = plan_recovery(
+            action_id=action_id,
+            testcase_id=testcase.id,
+            target=target["value"],
+            settings=self.settings,
+            attempt=0,
+        )
+        if plan.argv:
+            self.db.add_event(assessment["id"], "ai_corrective_check_selected", "AI Triage", plan.reason, testcase_id=testcase.id, target_id=target["id"])
+            if cancel.is_set():
+                return command_result, classification, attempts, audits
+            self.db.add_event(assessment["id"], "ai_corrective_check_started", "AI Triage", "Running the approved non-destructive corrective check.", testcase_id=testcase.id, target_id=target["id"])
+            if command_result is not None:
+                attempts.append(command_result)
+            retry_result = self._execute_target(target, testcase.id, cancel, recovery=True)
+            attempts.append(retry_result)
+            retry_classification = self._classify(testcase, retry_result, live=True)
+            outcome = "RECOVERY_SUCCEEDED" if retry_classification.final_verdict else "RECOVERY_EXHAUSTED"
+            if retry_classification.final_verdict:
+                classification = retry_classification
+                command_result = retry_result
+                self.db.add_event(assessment["id"], "ai_recovery_succeeded", "AI Triage", "A bounded corrective check produced evidence sufficient for deterministic verification.", testcase_id=testcase.id, target_id=target["id"])
+            else:
+                self.db.add_event(assessment["id"], "ai_recovery_exhausted", "AI Triage", "The bounded corrective check did not establish a final verdict; the result remains unresolved.", testcase_id=testcase.id, target_id=target["id"])
+        audits.append({
+            "assessment_id": assessment["id"],
+            "target_id": target["id"],
+            "testcase_id": testcase.id,
+            "result_id": None,
+            "trigger": trigger,
+            "action_id": action_id,
+            "validation_state": validation_state,
+            "response_json": json.dumps(response_payload, ensure_ascii=False),
+            "outcome": outcome,
+            "created_at": now_iso(),
+        })
+        return command_result, classification, attempts, audits
 
     @staticmethod
     def _classify(testcase, result: CommandResult, *, live: bool = False):
@@ -520,5 +724,26 @@ class AssessmentManager:
             return None
         assessment["targets"] = self.db.get_targets(assessment_id)
         assessment["results"] = self.db.list_results(assessment_id)
+        assessment.update(self._result_summary(assessment["results"]))
         assessment["recent_events"] = self.db.list_events(assessment_id)[-100:]
         return assessment
+
+    @staticmethod
+    def _result_summary(results: list[dict]) -> dict[str, int | str]:
+        unresolved = sum(1 for result in results if not result.get("final_verdict"))
+        informational = sum(
+            1 for result in results
+            if result.get("final_verdict") == "FOUND" and result.get("observation_type") in {"informational", "exposure_inventory"}
+        )
+        vulnerabilities = sum(
+            1 for result in results
+            if result.get("final_verdict") == "FOUND" and result.get("reportable_finding")
+        )
+        return {
+            "confirmed_vulnerability_count": vulnerabilities,
+            "informational_count": informational,
+            "verified_negative_count": sum(1 for result in results if result.get("final_verdict") == "NOT_FOUND"),
+            "not_applicable_count": sum(1 for result in results if result.get("final_verdict") == "NA"),
+            "unresolved_count": unresolved,
+            "completion_outcome": "COMPLETED_WITH_LIMITATIONS" if unresolved else "COMPLETED",
+        }

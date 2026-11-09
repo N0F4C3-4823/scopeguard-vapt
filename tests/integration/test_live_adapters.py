@@ -74,8 +74,10 @@ def test_reachability_only_adapter_never_becomes_security_finding(live_http_serv
     result = _run("19", live_http_service.server_address[1])
     classification = classify_live(next(test for test in TESTCASES if test.id == "19"), result)
     assert result.status == "COMPLETED"
-    assert classification.status == "INCONCLUSIVE"
-    assert "reachability" in (classification.failure_reason or "") or "inventory" in (classification.failure_reason or "")
+    assert classification.status == "FOUND"
+    assert classification.final_verdict == "FOUND"
+    assert classification.observation_type == "exposure_inventory"
+    assert classification.reportable_finding is False
 
 
 def test_every_registered_live_adapter_executes_an_allowlisted_command(live_http_service):

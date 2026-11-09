@@ -5,6 +5,22 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Status = Literal["FOUND", "NOT_FOUND", "NA", "INCONCLUSIVE"]
+FinalVerdict = Literal["FOUND", "NOT_FOUND", "NA"]
+CoverageStatus = Literal[
+    "PENDING",
+    "RUNNING",
+    "COMPLETED",
+    "BLOCKED",
+    "FAILED",
+    "INSUFFICIENT_EVIDENCE",
+]
+ObservationType = Literal[
+    "vulnerability",
+    "misconfiguration",
+    "informational",
+    "exposure_inventory",
+    "coverage",
+]
 AssessmentStatus = Literal[
     "DRAFT",
     "QUEUED",
@@ -41,6 +57,22 @@ class AssessmentCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Assessment name cannot be blank")
+        return value
+
+
+class AssessmentEdit(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    client_name: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("name")
+    @classmethod
+    def strip_edit_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         value = value.strip()
         if not value:
             raise ValueError("Assessment name cannot be blank")
@@ -87,6 +119,13 @@ class ResultModel(BaseModel):
     testcase_id: str
     testcase_name: str
     status: Status
+    final_verdict: FinalVerdict | None = None
+    coverage_status: CoverageStatus
+    coverage_reason: str | None = None
+    observation_type: ObservationType
+    reportable_finding: bool
+    description_line_1: str = ""
+    description_line_2: str = ""
     applicability: str
     conditions_tested: list[str]
     conditions_confirmed: list[str]
@@ -135,6 +174,12 @@ class AssessmentModel(BaseModel):
     current_target: str | None
     current_testcase: str | None
     llm_enabled: bool
+    completion_outcome: str = "COMPLETED"
+    confirmed_vulnerability_count: int = 0
+    informational_count: int = 0
+    verified_negative_count: int = 0
+    not_applicable_count: int = 0
+    unresolved_count: int = 0
 
 
 class AssessmentDetail(AssessmentModel):

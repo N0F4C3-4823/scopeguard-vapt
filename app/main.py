@@ -7,16 +7,16 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .applicability import ASSESSMENT_TYPES
 from .config import Settings, load_settings
 from .db import Database, now_iso
-from .exporter import ExportError, export_assessment
+from .exporter import ExportError, export_assessment, export_target, target_dir_name
 from .live_adapters import capability_matrix
-from .models import AssessmentCreate
+from .models import AssessmentCreate, AssessmentEdit
 from .ollama import OllamaClient
 from .orchestrator import AssessmentManager
 from .registry import TESTCASES
@@ -89,16 +89,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def overview() -> dict[str, Any]:
         assessments = db.list_assessments()
         results = [result for assessment in assessments for result in db.list_results(assessment["id"])]
+        finalized = [result for result in results if result.get("final_verdict")]
         return {
             "total_assessments": len(assessments),
             "running_assessments": sum(row["status"] in {"QUEUED", "RUNNING", "PAUSED"} for row in assessments),
             "completed_assessments": sum(row["status"] == "COMPLETED" for row in assessments),
             "error_assessments": sum(row["status"] in {"FAILED", "CANCELLED"} for row in assessments),
             "total_targets": sum(row["target_count"] for row in assessments),
-            "confirmed_findings": sum(row["status"] == "FOUND" for row in results),
-            "verified_negatives": sum(row["status"] == "NOT_FOUND" for row in results),
-            "not_applicable": sum(row["status"] == "NA" for row in results),
-            "inconclusive": sum(row["status"] == "INCONCLUSIVE" for row in results),
+            "confirmed_findings": sum(row.get("final_verdict") == "FOUND" and row.get("reportable_finding") for row in results),
+            "confirmed_vulnerabilities": sum(row.get("final_verdict") == "FOUND" and row.get("reportable_finding") for row in results),
+            "informational_observations": sum(row.get("final_verdict") == "FOUND" and row.get("observation_type") in {"informational", "exposure_inventory"} for row in results),
+            "verified_negatives": sum(row.get("final_verdict") == "NOT_FOUND" for row in results),
+            "not_applicable": sum(row.get("final_verdict") == "NA" for row in results),
+            "inconclusive": sum(1 for row in results if not row.get("final_verdict")),
+            "unresolved": sum(1 for row in results if not row.get("final_verdict")),
+            "finalized": len(finalized),
             "applicable": sum(row["applicability"] == "applicable" for row in results),
             "severity": {
                 "high": sum(row["severity"] == "high" for row in results),
@@ -180,15 +185,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Assessment not found")
         return _serialize_assessment(row)
 
-    @app.delete("/api/assessments/{assessment_id}")
-    async def delete_assessment(assessment_id: str) -> dict[str, Any]:
+    @app.delete("/api/assessments/{assessment_id}", response_model=None)
+    async def delete_assessment(assessment_id: str, cancel_active: bool = Query(default=False)) -> dict[str, Any] | JSONResponse:
         try:
-            manager.delete(assessment_id)
+            if cancel_active:
+                outcome = manager.request_delete(assessment_id)
+                if outcome == "cancellation_requested":
+                    return JSONResponse(status_code=202, content={"status": outcome, "assessment_id": assessment_id})
+            else:
+                manager.delete(assessment_id)
         except ValueError as error:
             detail = str(error)
             status_code = 409 if "before deleting" in detail else 404
             raise HTTPException(status_code=status_code, detail=detail) from error
         return {"status": "deleted", "assessment_id": assessment_id}
+
+    @app.patch("/api/assessments/{assessment_id}")
+    async def edit_assessment(assessment_id: str, payload: AssessmentEdit) -> dict[str, Any]:
+        try:
+            row = manager.edit_metadata(
+                assessment_id,
+                name=payload.name,
+                client_name=payload.client_name,
+                description=payload.description,
+            )
+        except ValueError as error:
+            status_code = 404 if str(error) == "Assessment not found" else 400
+            raise HTTPException(status_code=status_code, detail=str(error)) from error
+        return _serialize_assessment(row)
 
     @app.post("/api/assessments/{assessment_id}/start")
     async def start_assessment(assessment_id: str) -> dict[str, Any]:
@@ -227,6 +251,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not db.get_assessment(assessment_id):
             raise HTTPException(status_code=404, detail="Assessment not found")
         return {"results": db.list_results(assessment_id)}
+
+    @app.get("/api/assessments/{assessment_id}/targets/{target_id}/results")
+    async def target_results(assessment_id: str, target_id: str) -> dict[str, Any]:
+        if not db.get_assessment(assessment_id) or not db.get_target(assessment_id, target_id):
+            raise HTTPException(status_code=404, detail="Assessment target not found")
+        return {
+            "target": db.get_target(assessment_id, target_id),
+            "results": db.list_results(assessment_id, target_id),
+            "ai_recovery": db.list_ai_recovery(assessment_id, target_id),
+        }
+
+    @app.get("/api/assessments/{assessment_id}/targets/{target_id}/export/csv")
+    async def target_export_csv(assessment_id: str, target_id: str) -> FileResponse:
+        try:
+            exports = export_target(db, assessment_id, target_id, active_settings.data_dir)
+        except ExportError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return FileResponse(exports["csv"], filename=f"{assessment_id}-{target_id}-testcase-results.csv", media_type="text/csv")
+
+    @app.get("/api/assessments/{assessment_id}/targets/{target_id}/export/zip")
+    async def target_export_zip(assessment_id: str, target_id: str) -> FileResponse:
+        try:
+            exports = export_target(db, assessment_id, target_id, active_settings.data_dir)
+        except ExportError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return FileResponse(exports["zip"], filename=f"{assessment_id}-{target_id}.zip", media_type="application/zip")
 
     @app.get("/api/assessments/{assessment_id}/events")
     async def events(assessment_id: str) -> StreamingResponse:
@@ -278,9 +328,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def evidence(assessment_id: str, evidence_path: str) -> FileResponse:
         root = (active_settings.data_dir / "assessments" / assessment_id).resolve()
         requested = (root / evidence_path).resolve()
+        relative = Path(evidence_path)
+        valid_target_roots = {target_dir_name(target) for target in db.get_targets(assessment_id)}
+        if not relative.parts or relative.parts[0] not in valid_target_roots:
+            raise HTTPException(status_code=404, detail="Evidence artifact not found")
         if not requested.is_relative_to(root) or requested.is_symlink() or not requested.is_file():
             raise HTTPException(status_code=404, detail="Evidence artifact not found")
         return FileResponse(requested)
+
+    @app.get("/api/assessments/{assessment_id}/targets/{target_id}/evidence/{evidence_path:path}")
+    async def target_evidence(assessment_id: str, target_id: str, evidence_path: str) -> FileResponse:
+        if not db.get_target(assessment_id, target_id):
+            raise HTTPException(status_code=404, detail="Assessment target not found")
+        root = (active_settings.data_dir / "assessments" / assessment_id).resolve()
+        target_root = root / target_dir_name(db.get_target(assessment_id, target_id) or {})
+        requested = (target_root / evidence_path).resolve()
+        relative = Path(evidence_path)
+        if relative.is_absolute() or ".." in relative.parts or not requested.is_relative_to(target_root.resolve()) or requested.is_symlink() or not requested.is_file():
+            raise HTTPException(status_code=404, detail="Evidence artifact not found")
+        return FileResponse(requested)
+
+    @app.get("/api/assessments/{assessment_id}/ai-recovery")
+    async def ai_recovery(assessment_id: str) -> dict[str, Any]:
+        if not db.get_assessment(assessment_id):
+            raise HTTPException(status_code=404, detail="Assessment not found")
+        return {"entries": db.list_ai_recovery(assessment_id)}
 
     @app.post("/api/assessments/{assessment_id}/llm/triage/{result_id}")
     async def triage(assessment_id: str, result_id: int) -> dict[str, Any]:

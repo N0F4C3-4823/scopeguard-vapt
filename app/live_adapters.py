@@ -208,10 +208,11 @@ def _nmap(
     extra: tuple[str, ...] = (),
     host_timeout_seconds: int = 8,
     max_retries: int = 1,
+    script_timeout_seconds: int = 30,
 ) -> list[str]:
     argv = [
         "nmap", "-Pn", "--host-timeout", f"{host_timeout_seconds}s",
-        "--max-retries", str(max(0, int(max_retries))), "--reason",
+        "--max-retries", str(max(0, int(max_retries))), "--script-timeout", f"{max(1, int(script_timeout_seconds))}s", "--reason",
     ]
     if udp:
         argv.append("-sU")
@@ -243,6 +244,9 @@ def build_command(
     port_overrides: dict[str, int] | None = None,
     nmap_host_timeout_seconds: int = 8,
     nmap_max_retries: int = 1,
+    tcp_connect_timeout_seconds: int = 5,
+    protocol_timeout_seconds: int = 15,
+    nmap_script_timeout_seconds: int = 30,
 ) -> list[str] | None:
     """Build one explicit argv for a testcase; never interpolate a shell command."""
     adapter = adapter_for(testcase_id)
@@ -252,7 +256,13 @@ def build_command(
     host_timeout = max(1, int(nmap_host_timeout_seconds))
 
     def nmap(*args, **kwargs):
-        return _nmap(*args, host_timeout_seconds=host_timeout, max_retries=nmap_max_retries, **kwargs)
+        return _nmap(
+            *args,
+            host_timeout_seconds=host_timeout,
+            max_retries=nmap_max_retries,
+            script_timeout_seconds=nmap_script_timeout_seconds,
+            **kwargs,
+        )
 
     if testcase_id in {"02", "04", "05", "11", "22"}:
         keys = tuple(COMMON_TCP_PORTS.split(","))
@@ -294,8 +304,8 @@ def build_command(
         port = ports.get("21", 21)
         return [
             "curl", "--silent", "--show-error", "--include", "--disable-epsv",
-            "--user", "anonymous:IEUser@", "--list-only", "--connect-timeout", "2",
-            "--max-time", "5", "--url", f"ftp://{target}:{port}/",
+            "--user", "anonymous:IEUser@", "--list-only", "--connect-timeout", str(max(1, int(tcp_connect_timeout_seconds))),
+            "--max-time", str(max(1, int(protocol_timeout_seconds))), "--url", f"ftp://{target}:{port}/",
         ]
     if testcase_id == "20":
         keys = ("1883", "8883")
@@ -316,14 +326,14 @@ def build_command(
         return nmap(target, str(ports.get("1433", 1433)), scripts=("ms-sql-info",))
     if testcase_id == "27":
         port = ports.get("80", 80)
-        return ["curl", "--silent", "--show-error", "--include", "--connect-timeout", "2", "--max-time", "5", "--url", f"http://{target}:{port}/"]
+        return ["curl", "--silent", "--show-error", "--include", "--connect-timeout", str(max(1, int(tcp_connect_timeout_seconds))), "--max-time", str(max(1, int(protocol_timeout_seconds))), "--url", f"http://{target}:{port}/"]
     if testcase_id == "29":
         return ["nmap", "-6", "-sn", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "30":
         return nmap(target, ",".join(str(ports.get(f"{item}/udp", item)) for item in (500, 4500)), scripts=("ike-version",), udp=True)
     if testcase_id == "33":
         port = ports.get("80", 80)
-        return ["curl", "--silent", "--show-error", "--include", "--connect-timeout", "2", "--max-time", "5", "--url", f"http://{target}:{port}/"]
+        return ["curl", "--silent", "--show-error", "--include", "--connect-timeout", str(max(1, int(tcp_connect_timeout_seconds))), "--max-time", str(max(1, int(protocol_timeout_seconds))), "--url", f"http://{target}:{port}/"]
     if testcase_id in {"34", "39"}:
         return nmap(target, str(ports.get("22", 22)), scripts=("ssh2-enum-algos",), service_detection=True)
     if testcase_id == "35":
@@ -337,7 +347,7 @@ def build_command(
     if testcase_id == "38":
         return ["nmap", "-sn", "-PE", "-PP", "-PM", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "40":
-        return ["dig", "+time=2", "+tries=1", "+noall", "+answer", f"@{target}", ".", "NS"]
+        return ["dig", f"+time={max(1, int(protocol_timeout_seconds))}", "+tries=1", "+noall", "+answer", f"@{target}", ".", "NS"]
     raise ValueError(f"No command builder for testcase {testcase_id}")
 
 
@@ -351,7 +361,10 @@ class LiveParse:
     validation_state: str = "INSUFFICIENT"
 
 
-_PORT_LINE = re.compile(r"^\s*(\d+)/(tcp|udp)\s+(open|closed|filtered|open\|filtered)\s+(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+_PORT_LINE = re.compile(
+    r"^\s*(\d+)/(tcp|udp)\s+(open|closed|filtered|open\|filtered)(?:\s+(.*?))?\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def _text(result: CommandResult) -> str:
@@ -359,15 +372,37 @@ def _text(result: CommandResult) -> str:
 
 
 def _states(text: str) -> list[tuple[int, str, str]]:
-    return [(int(port), state.lower(), service.strip()) for port, _proto, state, service in _PORT_LINE.findall(text)]
+    return [(int(port), state.lower(), (service or "").strip()) for port, _proto, state, service in _PORT_LINE.findall(text)]
+
+
+def _nmap_complete(text: str) -> bool:
+    lower = text.lower()
+    return bool(
+        re.search(r"nmap done:", lower)
+        and not re.search(r"skipping host|host timeout|scan timed out", lower)
+    )
+
+
+def _all_ports_closed(text: str) -> bool:
+    lower = text.lower()
+    return bool(
+        re.search(r"not shown:.*\bclosed\b.*\bports?", lower)
+        or re.search(r"all .*scanned ports.*closed", lower)
+    )
 
 
 def _inconclusive(reason: str, *, observation: str | None = None) -> LiveParse:
     return LiveParse("INCONCLUSIVE", "applicable", reason, (observation,) if observation else ())
 
 
-def _service_absent(states: list[tuple[int, str, str]], testcase_id: str) -> LiveParse | None:
-    if states and all(state == "closed" for _port, state, _service in states):
+def _service_absent(
+    states: list[tuple[int, str, str]],
+    testcase_id: str,
+    *,
+    complete: bool,
+    all_ports_closed: bool = False,
+) -> LiveParse | None:
+    if complete and (states and all(state == "closed" for _port, state, _service in states) or all_ports_closed):
         return LiveParse("NA", "No applicable service was observed on the complete tested port set", f"testcase {testcase_id} service ports were explicitly closed", (f"live-{testcase_id}-closed",), "informational", "APPLICABILITY_CONFIRMED")
     if any(state in {"filtered", "open|filtered"} for _port, state, _service in states) and not any(state == "open" for _port, state, _service in states):
         return _inconclusive("Filtering or UDP silence prevented service applicability from being established", observation=f"live-{testcase_id}-filtered")
@@ -409,10 +444,12 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
     if result.exit_code != 0 or result.status != "COMPLETED":
         return _inconclusive(f"live adapter command failed with exit status {result.exit_code}")
     states = _states(text)
-    complete = "nmap done:" in lower
+    complete = _nmap_complete(text)
+    if states and not complete and testcase_id not in {"18", "27", "33", "40"}:
+        return _inconclusive("Nmap returned port states without a trustworthy completion record")
 
     if testcase_id in {"01", "07", "09", "13", "17", "30"}:
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if testcase_id == "13" and ("sysdescr" in lower or "snmpv" in lower) and "script execution failed" not in lower:
@@ -442,11 +479,11 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("NOT_FOUND", "applicable", None, ("live-12-no-filtered-port",), "informational", "VALIDATED")
         return _inconclusive("TCP state scan did not complete with a definitive filtered/non-filtered result")
     if testcase_id == "19":
-        if states:
-            return _inconclusive("port inventory is an exposure observation only; reachability alone is not a security classification", observation="live-19-port-inventory")
+        if complete and states:
+            return LiveParse("FOUND", "applicable", None, ("live-19-port-inventory",), "informational", "VALIDATED")
         return _inconclusive("no complete port inventory was captured")
     if testcase_id == "20":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if complete and states:
@@ -455,7 +492,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
     if testcase_id in {"02", "04", "05", "11", "22"}:
         if not states:
             return _inconclusive("service fingerprint scan returned no parseable port state")
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         identified = [service for _port, state, service in states if state == "open" and service and service.lower() not in {"unknown", "tcpwrapped"}]
@@ -473,7 +510,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("FOUND", "applicable", None, ("live-02-fingerprint",), "informational", "VALIDATED")
         return _inconclusive("service inventory was completed without a supported condition")
     if testcase_id == "08":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if re.search(r"TLSv1\.[01]\b|SSLv3\b", text, re.I):
@@ -482,7 +519,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("NOT_FOUND", "applicable", None, ("live-08-modern-tls-only",), "informational", "VALIDATED")
         return _inconclusive("TLS enumeration did not establish a supported protocol predicate")
     if testcase_id == "06":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if re.search(r"namingcontexts|supportedldapversion|rootdomainnamingcontext", lower):
@@ -491,21 +528,21 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("NOT_FOUND", "applicable", None, ("live-06-auth-required",), "informational", "VALIDATED")
         return _inconclusive("LDAP was reachable but the safe unauthenticated directory predicate was not established")
     if testcase_id == "10":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if "telnet" in lower or re.search(r"login:|username:|welcome", lower):
             return LiveParse("FOUND", "applicable", None, ("live-10-plaintext-telnet",), "medium", "VALIDATED")
         return _inconclusive("Telnet port state was observed without a plaintext service banner")
     if testcase_id == "15":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if re.search(r"admin|console|management|dashboard", lower):
             return LiveParse("FOUND", "applicable", None, ("live-15-management-marker",), "medium", "VALIDATED")
         return _inconclusive("HTTP service was observed without a validated management interface marker")
     if testcase_id == "16":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if re.search(r"readable|anonymous|share\s+enumeration", lower) and not re.search(r"access.denied|logon.failure|authentication", lower):
@@ -514,7 +551,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("NOT_FOUND", "applicable", None, ("live-16-share-denied",), "informational", "VALIDATED")
         return _inconclusive("SMB share response did not establish unauthenticated read or denial")
     if testcase_id == "18":
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if "anonymous ftp login allowed" in lower and not re.search(r"false|denied", lower):
@@ -523,7 +560,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("NOT_FOUND", "applicable", None, ("live-18-anonymous-denied",), "informational", "VALIDATED")
         return _inconclusive("FTP response did not establish anonymous access or denial")
     if testcase_id in {"21", "34", "39", "23", "24", "25", "36", "37"}:
-        absent = _service_absent(states, testcase_id)
+        absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
         if testcase_id == "21":

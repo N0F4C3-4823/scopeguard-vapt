@@ -123,6 +123,13 @@ class Database:
             testcase_id TEXT NOT NULL,
             testcase_name TEXT NOT NULL,
             status TEXT NOT NULL,
+            final_verdict TEXT,
+            coverage_status TEXT NOT NULL DEFAULT 'COMPLETED',
+            coverage_reason TEXT,
+            observation_type TEXT NOT NULL DEFAULT 'vulnerability',
+            reportable_finding INTEGER NOT NULL DEFAULT 0,
+            description_line_1 TEXT NOT NULL DEFAULT '',
+            description_line_2 TEXT NOT NULL DEFAULT '',
             applicability TEXT NOT NULL,
             conditions_tested_json TEXT NOT NULL,
             conditions_confirmed_json TEXT NOT NULL,
@@ -162,6 +169,19 @@ class Database:
             validation_state TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS ai_recovery (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+            target_id TEXT NOT NULL,
+            testcase_id TEXT NOT NULL,
+            result_id INTEGER,
+            trigger TEXT NOT NULL,
+            action_id TEXT,
+            validation_state TEXT NOT NULL,
+            response_json TEXT NOT NULL DEFAULT '{}',
+            outcome TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_events_assessment ON events(assessment_id, id);
         CREATE INDEX IF NOT EXISTS idx_results_assessment ON results(assessment_id, target_id, testcase_id);
         """
@@ -179,6 +199,19 @@ class Database:
             }
             for column, statement in migrations.items():
                 if column not in columns:
+                    connection.execute(statement)
+            result_columns = {row[1] for row in connection.execute("PRAGMA table_info(results)").fetchall()}
+            result_migrations = {
+                "final_verdict": "ALTER TABLE results ADD COLUMN final_verdict TEXT",
+                "coverage_status": "ALTER TABLE results ADD COLUMN coverage_status TEXT NOT NULL DEFAULT 'COMPLETED'",
+                "coverage_reason": "ALTER TABLE results ADD COLUMN coverage_reason TEXT",
+                "observation_type": "ALTER TABLE results ADD COLUMN observation_type TEXT NOT NULL DEFAULT 'vulnerability'",
+                "reportable_finding": "ALTER TABLE results ADD COLUMN reportable_finding INTEGER NOT NULL DEFAULT 0",
+                "description_line_1": "ALTER TABLE results ADD COLUMN description_line_1 TEXT NOT NULL DEFAULT ''",
+                "description_line_2": "ALTER TABLE results ADD COLUMN description_line_2 TEXT NOT NULL DEFAULT ''",
+            }
+            for column, statement in result_migrations.items():
+                if column not in result_columns:
                     connection.execute(statement)
 
     def create_assessment(self, assessment: dict[str, Any], targets: list[dict[str, Any]]) -> None:
@@ -217,6 +250,14 @@ class Database:
             ).fetchall()
             return [_decode(row, ("capabilities_json", "permissions_json")) for row in rows]
 
+    def get_target(self, assessment_id: str, target_id: str) -> dict[str, Any] | None:
+        with self._lock, self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM targets WHERE assessment_id=? AND id=?",
+                (assessment_id, target_id),
+            ).fetchone()
+            return dict(row) if row else None
+
     def get_targets(self, assessment_id: str) -> list[dict[str, Any]]:
         with self._lock, self.connect() as connection:
             rows = connection.execute(
@@ -228,6 +269,9 @@ class Database:
         if not fields:
             return
         allowed = {
+            "name",
+            "client_name",
+            "description",
             "status",
             "started_at",
             "completed_at",
@@ -326,6 +370,13 @@ class Database:
                 "testcase_id",
                 "testcase_name",
                 "status",
+                "final_verdict",
+                "coverage_status",
+                "coverage_reason",
+                "observation_type",
+                "reportable_finding",
+                "description_line_1",
+                "description_line_2",
                 "applicability",
                 "conditions_tested_json",
                 "conditions_confirmed_json",
@@ -347,11 +398,15 @@ class Database:
         with self._lock, self.connect() as connection:
             cursor = connection.execute(
                 """INSERT INTO results
-                (assessment_id,target_id,target,target_label,testcase_id,testcase_name,status,applicability,
+                (assessment_id,target_id,target,target_label,testcase_id,testcase_name,status,
+                 final_verdict,coverage_status,coverage_reason,observation_type,reportable_finding,
+                 description_line_1,description_line_2,applicability,
                  conditions_tested_json,conditions_confirmed_json,conditions_not_found_json,
                  inconclusive_conditions_json,severity,finding_ids_json,evidence_paths_json,poc_paths_json,
                  tools_used_json,validation_state,failure_reason,evidence_id,command,output_preview,created_at)
                 VALUES (:assessment_id,:target_id,:target,:target_label,:testcase_id,:testcase_name,:status,
+                        :final_verdict,:coverage_status,:coverage_reason,:observation_type,:reportable_finding,
+                        :description_line_1,:description_line_2,
                         :applicability,:conditions_tested_json,:conditions_confirmed_json,
                         :conditions_not_found_json,:inconclusive_conditions_json,:severity,:finding_ids_json,
                         :evidence_paths_json,:poc_paths_json,:tools_used_json,:validation_state,
@@ -360,12 +415,18 @@ class Database:
             )
             return int(cursor.lastrowid)
 
-    def list_results(self, assessment_id: str) -> list[dict[str, Any]]:
+    def list_results(self, assessment_id: str, target_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock, self.connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM results WHERE assessment_id=? ORDER BY target_id, testcase_id",
-                (assessment_id,),
-            ).fetchall()
+            if target_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM results WHERE assessment_id=? ORDER BY target_id, testcase_id",
+                    (assessment_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM results WHERE assessment_id=? AND target_id=? ORDER BY testcase_id",
+                    (assessment_id, target_id),
+                ).fetchall()
             fields = (
                 "conditions_tested_json",
                 "conditions_confirmed_json",
@@ -410,4 +471,29 @@ class Database:
             rows = connection.execute(
                 "SELECT * FROM llm_triage WHERE assessment_id=? ORDER BY id", (assessment_id,)
             ).fetchall()
+            return [_decode(row, ("response_json",)) for row in rows]
+
+    def add_ai_recovery(self, entry: dict[str, Any]) -> int:
+        with self._lock, self.connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO ai_recovery
+                (assessment_id,target_id,testcase_id,result_id,trigger,action_id,validation_state,response_json,outcome,created_at)
+                VALUES (:assessment_id,:target_id,:testcase_id,:result_id,:trigger,:action_id,:validation_state,
+                        :response_json,:outcome,:created_at)""",
+                entry,
+            )
+            return int(cursor.lastrowid)
+
+    def list_ai_recovery(self, assessment_id: str, target_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock, self.connect() as connection:
+            if target_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM ai_recovery WHERE assessment_id=? ORDER BY id",
+                    (assessment_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM ai_recovery WHERE assessment_id=? AND target_id=? ORDER BY id",
+                    (assessment_id, target_id),
+                ).fetchall()
             return [_decode(row, ("response_json",)) for row in rows]

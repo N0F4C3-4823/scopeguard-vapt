@@ -114,6 +114,65 @@ def test_api_does_not_delete_active_assessment(application):
     client.post(f"/api/assessments/{assessment_id}/cancel")
 
 
+def test_api_edits_metadata_without_changing_authorized_scope(application):
+    client = TestClient(application)
+    created = client.post(
+        "/api/assessments",
+        json={
+            "name": "Metadata before",
+            "client_name": "Old client",
+            "targets": ["fixture://negative"],
+            "authorized": True,
+            "profile": "controlled_fixture",
+        },
+    ).json()
+    updated = client.patch(
+        f"/api/assessments/{created['id']}",
+        json={"name": "Metadata after", "client_name": "New client", "description": "Updated notes"},
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["name"] == "Metadata after"
+    assert body["client_name"] == "New client"
+    assert body["description"] == "Updated notes"
+    assert client.post(f"/api/assessments/{created['id']}/start").status_code == 200
+    running_update = client.patch(
+        f"/api/assessments/{created['id']}",
+        json={"description": "Notes updated while running"},
+    )
+    assert running_update.status_code == 200
+    assert running_update.json()["description"] == "Notes updated while running"
+    for _ in range(100):
+        if client.get(f"/api/assessments/{created['id']}").json()["status"] in {"COMPLETED", "FAILED", "CANCELLED"}:
+            break
+        time.sleep(0.02)
+    assert client.get(f"/api/assessments/{created['id']}").json()["targets"][0]["value"] == "fixture://negative"
+
+
+def test_api_stop_and_delete_active_assessment(application):
+    client = TestClient(application)
+    created = client.post(
+        "/api/assessments",
+        json={
+            "name": "Active stop and delete",
+            "targets": ["fixture://timeout"],
+            "authorized": True,
+            "profile": "controlled_fixture",
+        },
+    ).json()
+    assessment_id = created["id"]
+    assert client.post(f"/api/assessments/{assessment_id}/start").status_code == 200
+    response = client.delete(f"/api/assessments/{assessment_id}?cancel_active=true")
+    assert response.status_code == 202
+    assert response.json()["status"] == "cancellation_requested"
+    for _ in range(100):
+        if client.get(f"/api/assessments/{assessment_id}").json()["status"] in {"CANCELLED", "FAILED", "COMPLETED"}:
+            break
+        time.sleep(0.02)
+    assert client.delete(f"/api/assessments/{assessment_id}").status_code == 200
+    assert client.get(f"/api/assessments/{assessment_id}").status_code == 404
+
+
 def test_api_reconciles_persisted_active_assessment_after_restart(application):
     client = TestClient(application)
     response = client.post(

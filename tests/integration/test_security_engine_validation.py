@@ -454,7 +454,9 @@ def test_controlled_telnet_legacy_vnc_and_tcp_state_conditions():
         assert result.status == "COMPLETED"
         assert classification.status == "NOT_FOUND"
         result, classification = execute("19", **{"80": http_port})
-        assert classification.status == "INCONCLUSIVE"
+        assert classification.status == "FOUND"
+        assert classification.final_verdict == "FOUND"
+        assert classification.reportable_finding is False
 
 
 def test_controlled_snmp_ntp_and_tls_commands_preserve_uncertainty():
