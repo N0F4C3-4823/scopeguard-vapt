@@ -102,6 +102,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .panel-header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 17px; }
 .panel-header p { color: var(--muted); font-size: 12px; margin-bottom: 0; }
 .panel-header h2 { margin-bottom: 4px; }
+.target-current { display: grid; gap: 3px; min-width: 180px; text-align: right; }
+.target-current strong { color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.target-switcher { display: grid; gap: 9px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.target-switcher-list { display: flex; gap: 9px; flex-wrap: wrap; }
+.target-switch-button { display: inline-flex; align-items: center; gap: 10px; }
+.target-switch-button span:last-child { color: var(--accent); font-weight: 600; }
 .panel-actions { display: flex; gap: 8px; align-items: center; }
 
 .table-wrap { overflow: auto; }
@@ -290,5 +296,7 @@ textarea { min-height: 118px; resize: vertical; line-height: 1.55; }
   .assessment-hero { padding: 18px; }
   .assessment-hero .hero-top { display: block; }
   .hero-status { display: inline-flex; margin-top: 12px; }
+  .target-current { min-width: 0; margin-top: 10px; text-align: left; }
+  .target-switch-button { width: 100%; justify-content: space-between; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
