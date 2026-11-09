@@ -130,3 +130,34 @@ def test_recovery_skips_repeated_filtering_but_allows_timeout_retry():
     timeout = _result(status="TIMEOUT", timed_out=True)
     assert recovery_is_useful(testcase_id="10", result=filtered, reason="TCP filtering prevented applicability") is False
     assert recovery_is_useful(testcase_id="10", result=timeout, reason="bounded command timeout") is True
+
+
+def test_timeout_recovery_uses_a_second_bounded_attempt_when_first_retry_fails(manager, monkeypatch):
+    testcase = TESTCASE_BY_ID["10"]
+    initial = _result(status="TIMEOUT", timed_out=True)
+    classification = Classification(
+        "INCONCLUSIVE", "applicable", (testcase.condition,), (), (), (testcase.condition,),
+        "unknown", "bounded command timeout", (), "INCOMPLETE",
+        final_verdict=None, coverage_status="FAILED", coverage_reason="bounded command timeout",
+    )
+    retries = iter([
+        _result(status="TIMEOUT", timed_out=True),
+        _result(
+            status="COMPLETED",
+            stdout=b"Nmap scan report for 127.0.0.1\n23/tcp open telnet\nNmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n",
+        ),
+    ])
+    monkeypatch.setattr(manager.db, "add_event", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(manager, "_run_argv", lambda *_args, **_kwargs: next(retries))
+    command, final, attempts, audits = manager._resolve_discrepancy(
+        {"id": "assessment-test", "llm_enabled": 0},
+        {"id": "target-test", "value": "127.0.0.1", "label": "loopback", "kind": "live", "host_count": 1},
+        testcase,
+        initial,
+        classification,
+        threading.Event(),
+    )
+    assert command.status == "COMPLETED"
+    assert final.final_verdict == "FOUND"
+    assert len(attempts) == 3  # original timeout + two distinct bounded retries
+    assert len(audits) == 2

@@ -71,7 +71,12 @@ def _description(result: dict[str, Any]) -> tuple[str, str]:
     line_1 = str(result.get("description_line_1") or "")
     line_2 = str(result.get("description_line_2") or "")
     verdict = result.get("final_verdict")
-    if validate_two_line_description(line_1, line_2):
+    target_identifiers = tuple(
+        str(value)
+        for value in (result.get("target"), result.get("target_label"))
+        if value
+    )
+    if validate_two_line_description(line_1, line_2, target_identifiers=target_identifiers):
         return line_1, line_2
     if verdict not in {"FOUND", "NOT_FOUND", "NA"}:
         return "", ""
@@ -133,7 +138,12 @@ def _validate_finalized_artifacts(assessment_root: Path, results: list[dict[str,
             raise ExportError(f"Export refused: NA result {result['target_id']}/{result['testcase_id']} has a POC")
         if verdict in {"FOUND", "NOT_FOUND", "NA"}:
             line_1, line_2 = _description(result)
-            if not validate_two_line_description(line_1, line_2):
+            target_identifiers = tuple(
+                str(value)
+                for value in (result.get("target"), result.get("target_label"))
+                if value
+            )
+            if not validate_two_line_description(line_1, line_2, target_identifiers=target_identifiers):
                 raise ExportError(
                     f"Export refused: finalized result {result['target_id']}/{result['testcase_id']} lacks two-line explanation"
                 )

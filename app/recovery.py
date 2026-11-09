@@ -114,8 +114,11 @@ def plan_recovery(
         return RecoveryPlan(action_id, None, "Controlled fixture evidence is deterministic; no live corrective command is permitted")
     if attempt >= settings.scanner_max_retries:
         return RecoveryPlan(action_id, None, "Bounded recovery retry limit was reached")
-    # A retry changes the scanner strategy: it gives Nmap more time and one
-    # additional bounded retry, rather than repeating identical argv.
+    # A retry changes the scanner strategy: it gives the protocol and scanner
+    # more time, with a small capped progression rather than an unbounded
+    # timeout multiplier.  The first retry doubles the relevant budget; the
+    # second is capped at four times the original budget.
+    retry_factor = min(2 ** (attempt + 1), 4)
     if action_id == "collect_safe_banner" and testcase_id not in {"02", "04", "05", "11", "22"}:
         return RecoveryPlan(action_id, None, "Banner collection is not an approved alternate for this testcase")
     if action_id == "verify_discovered_tcp_service" and protocol_for_testcase(testcase_id) not in {"tcp", "other"}:
@@ -133,11 +136,11 @@ def plan_recovery(
         target,
         port_overrides=port_overrides or None,
         dns_transport=transport if isinstance(transport, str) else None,
-        nmap_host_timeout_seconds=min(settings.scanner_host_timeout_seconds * 2, 120),
+        nmap_host_timeout_seconds=min(settings.scanner_host_timeout_seconds * retry_factor, 120),
         nmap_max_retries=min(settings.scanner_max_retries + attempt + 1, 5),
-        tcp_connect_timeout_seconds=min(settings.tcp_connect_timeout_seconds * 2, 15),
-        protocol_timeout_seconds=min(settings.protocol_timeout_seconds * 2, 30),
-        nmap_script_timeout_seconds=min(settings.nmap_script_timeout_seconds * 2, 60),
+        tcp_connect_timeout_seconds=min(settings.tcp_connect_timeout_seconds * retry_factor, 15),
+        protocol_timeout_seconds=min(settings.protocol_timeout_seconds * retry_factor, 30),
+        nmap_script_timeout_seconds=min(settings.nmap_script_timeout_seconds * retry_factor, 60),
     )
     if argv is None:
         return RecoveryPlan(action_id, None, "No live command is registered for this capability-dependent testcase")
@@ -145,5 +148,5 @@ def plan_recovery(
     timeout = settings.live_command_timeout if adapter.live_status == "LIVE" else settings.live_limited_command_timeout
     if argv[0].rsplit("/", 1)[-1] == "nmap":
         timeout = max(timeout, settings.scanner_host_timeout_seconds + settings.scanner_command_grace_seconds)
-    timeout = min(timeout * 2, float(settings.assessment_deadline_seconds))
+    timeout = min(timeout * retry_factor, float(settings.assessment_deadline_seconds))
     return RecoveryPlan(action_id, argv, "Approved bounded retry with an explicit alternate strategy", timeout_seconds=timeout)

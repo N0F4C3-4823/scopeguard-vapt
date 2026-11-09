@@ -67,9 +67,9 @@ SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 \
 ./install.sh
 ~~~
 
-The default model is qwen2.5:1.5b-instruct. ScopeGuard limits Ollama to one loaded model and one request at a time. The installer verifies the local API and performs a real inference request. If RAM is insufficient, Ollama is unavailable, or the model is missing, assessment execution continues with AI disabled and the limitation is recorded.
+The default model is qwen2.5:1.5b-instruct. New GUI assessments enable bounded AI discrepancy diagnosis by default; the operator can disable it before starting. When a timeout, parse failure, contradictory observation, or insufficient evidence is detected, ScopeGuard sends only the relevant persisted evidence to Ollama and accepts recommendations only from the typed safe-action registry. Recovery uses protocol-specific timeout budgets, a maximum of three changed attempts, and no identical-command loops. ScopeGuard limits Ollama to one loaded model and one request at a time. The installer verifies the local API and performs a real inference request. If RAM is insufficient, Ollama is unavailable, or the model is missing, deterministic assessment execution continues and the limitation is recorded.
 
-After startup, Settings → Local AI can run the application-level schema and evidence-reference health test. AI output is stored as triage metadata and cannot create, remove, or reclassify a finding.
+After startup, Settings → Local AI can run the application-level schema and evidence-reference health test. AI output is stored as triage metadata and recovery audit history; it cannot create, remove, or reclassify a finding, execute arbitrary commands, or expand scope.
 
 ## First assessment
 
@@ -122,7 +122,7 @@ The category folders are created for every testcase. Condition folders and PNGs 
 
 Each completed assessment contains one row for each target × 40 testcases in testcase_results.csv, plus findings.csv, tool_status.csv, llm_triage.csv, assessment_summary.txt, assessment.json, logs, raw command evidence, hashes, manifests, POC folders, and a verified ZIP archive. The GUI exposes only files that exist for the selected assessment.
 
-The results screen is organized by target. A target's table remains in testcase order from 01 through 40; unresolved coverage is shown separately from the certified FOUND, NOT_FOUND, and NA verdicts. View POC opens the target-owned PNG, Download POC downloads its original bytes, and Copy POC writes the PNG as `image/png` when the browser grants clipboard permission. Copy Description writes only the two displayed explanation lines, including for NA results.
+The results screen is organized by target. A target's table remains in testcase order from 01 through 40; unresolved coverage is shown separately from the certified FOUND, NOT_FOUND, and NA verdicts. Every finalized description is exactly two client-facing lines and excludes target identifiers, tool names, AI references, and internal execution terms. View POC opens the target-owned PNG, Download POC downloads its original bytes, and Copy POC writes the PNG as `image/png` when the browser grants clipboard permission. Copy Description writes only the two displayed explanation lines, including for NA results.
 
 ## Troubleshooting
 

@@ -952,7 +952,44 @@ class AssessmentManager:
             )
         if plan.action_id is not None and validation_state != "REJECTED":
             validation_state = "VALIDATED"
-        if plan.argv or plan.action_id in {"reparse_raw_output", "inspect_existing_evidence"}:
+
+        # Keep the original failed execution as provenance, then allow at most
+        # the configured bounded retry count.  Each retry must have a changed
+        # argv (normally a larger protocol budget); identical commands are not
+        # repeated merely to make a report look complete.
+        if command_result is not None:
+            attempts.append(command_result)
+        current_result = command_result
+        current_classification = classification
+        seen_commands = {tuple(command_result.argv)} if command_result is not None else set()
+        max_attempts = max(0, min(self.settings.scanner_max_retries, 3))
+        recovery_succeeded = False
+        for attempt in range(max_attempts):
+            if cancel.is_set():
+                break
+            if attempt:
+                plan = plan_recovery(
+                    action_id=action_id,
+                    testcase_id=testcase.id,
+                    target=target["value"],
+                    settings=self.settings,
+                    attempt=attempt,
+                    parameters=parameters,
+                )
+            if plan.action_id is None:
+                break
+            if plan.argv and tuple(plan.argv) in seen_commands:
+                self.db.add_event(
+                    assessment["id"],
+                    "ai_recovery_skipped",
+                    "AI Triage",
+                    "The next approved action would repeat an identical command; bounded recovery stopped.",
+                    testcase_id=testcase.id,
+                    target_id=target["id"],
+                )
+                break
+            if not (plan.argv or plan.action_id in {"reparse_raw_output", "inspect_existing_evidence"}):
+                break
             self.db.add_event(
                 assessment["id"],
                 "ai_corrective_check_selected",
@@ -960,10 +997,8 @@ class AssessmentManager:
                 plan.reason,
                 testcase_id=testcase.id,
                 target_id=target["id"],
-                payload={"action_id": plan.action_id, "parameters": parameters},
+                payload={"action_id": plan.action_id, "parameters": parameters, "attempt": attempt + 1},
             )
-            if cancel.is_set():
-                return command_result, classification, attempts, audits
             self.db.add_event(
                 assessment["id"],
                 "ai_corrective_check_started",
@@ -972,63 +1007,89 @@ class AssessmentManager:
                 testcase_id=testcase.id,
                 target_id=target["id"],
             )
-            if command_result is not None:
-                attempts.append(command_result)
             retry_result: CommandResult | None = None
             if plan.argv:
                 retry_result = self._run_argv(
                     plan.argv,
                     plan.timeout_seconds or self.settings.live_command_timeout,
                 )
+                seen_commands.add(tuple(plan.argv))
                 attempts.append(retry_result)
                 retry_classification = self._classify(
                     testcase,
                     retry_result,
                     live=target["kind"] != "fixture",
                 )
-            elif plan.action_id == "reparse_raw_output" and command_result is not None:
-                retry_result = command_result
+            elif plan.action_id == "reparse_raw_output" and current_result is not None:
+                retry_result = current_result
                 retry_classification = self._classify(
                     testcase,
-                    command_result,
+                    current_result,
                     live=target["kind"] != "fixture",
                 )
             else:
-                retry_classification = classification
-            outcome = "RECOVERY_SUCCEEDED" if retry_classification.final_verdict else "RECOVERY_EXHAUSTED"
+                retry_classification = current_classification
+            audit_outcome = "RECOVERY_SUCCEEDED" if retry_classification.final_verdict else "RECOVERY_ATTEMPTED"
+            audits.append({
+                "assessment_id": assessment["id"],
+                "target_id": target["id"],
+                "testcase_id": testcase.id,
+                "result_id": None,
+                "trigger": trigger,
+                "action_id": plan.action_id,
+                "validation_state": validation_state,
+                "response_json": json.dumps({**response_payload, "attempt": attempt + 1}, ensure_ascii=False),
+                "outcome": audit_outcome,
+                "created_at": now_iso(),
+            })
+            current_result = retry_result or current_result
+            current_classification = retry_classification
             if retry_classification.final_verdict:
+                command_result = retry_result or command_result
                 classification = retry_classification
-                if retry_result is not None:
-                    command_result = retry_result
-                self.db.add_event(
-                    assessment["id"],
-                    "ai_recovery_succeeded",
-                    "AI Triage",
-                    "A bounded corrective check produced evidence sufficient for deterministic verification.",
-                    testcase_id=testcase.id,
-                    target_id=target["id"],
-                )
-            else:
-                self.db.add_event(
-                    assessment["id"],
-                    "ai_recovery_exhausted",
-                    "AI Triage",
-                    "The bounded corrective check did not establish a final verdict; the result remains unresolved.",
-                    testcase_id=testcase.id,
-                    target_id=target["id"],
-                )
-        audits.append({
-            "assessment_id": assessment["id"],
-            "target_id": target["id"],
-            "testcase_id": testcase.id,
-            "result_id": None,
-            "trigger": trigger,
-            "action_id": action_id,
-            "validation_state": validation_state,
-            "response_json": json.dumps(response_payload, ensure_ascii=False),
-            "outcome": outcome,
-            "created_at": now_iso(),
-        })
+                recovery_succeeded = True
+                break
+            if not recovery_is_useful(
+                testcase_id=testcase.id,
+                result=current_result,
+                reason=retry_classification.failure_reason,
+            ):
+                break
+
+        outcome = "RECOVERY_SUCCEEDED" if recovery_succeeded else "RECOVERY_EXHAUSTED"
+        if recovery_succeeded:
+            self.db.add_event(
+                assessment["id"],
+                "ai_recovery_succeeded",
+                "AI Triage",
+                "A bounded corrective check produced evidence sufficient for deterministic verification.",
+                testcase_id=testcase.id,
+                target_id=target["id"],
+            )
+        else:
+            self.db.add_event(
+                assessment["id"],
+                "ai_recovery_exhausted",
+                "AI Triage",
+                "Bounded corrective checks did not establish a final verdict; the result remains unresolved.",
+                testcase_id=testcase.id,
+                target_id=target["id"],
+            )
+            # Preserve one audit record even when no approved action could be
+            # executed, so the report explains why recovery stopped.
+            if not audits:
+                audits.append({
+                    "assessment_id": assessment["id"],
+                    "target_id": target["id"],
+                    "testcase_id": testcase.id,
+                    "result_id": None,
+                    "trigger": trigger,
+                    "action_id": action_id,
+                    "validation_state": validation_state,
+                    "response_json": json.dumps(response_payload, ensure_ascii=False),
+                    "outcome": outcome,
+                    "created_at": now_iso(),
+                })
         return command_result, classification, attempts, audits
 
     @staticmethod
