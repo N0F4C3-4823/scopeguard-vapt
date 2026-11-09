@@ -1,0 +1,4 @@
+interface:
+  display_name: "ScopeGuard QA"
+  short_description: "Build and verify evidence-driven ScopeGuard VAPT workflows"
+  default_prompt: "Use $scopeguard-qa to build or verify ScopeGuard security assessment features."

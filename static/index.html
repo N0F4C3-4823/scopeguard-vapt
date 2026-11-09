@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="ScopeGuard VAPT evidence-driven network security assessment platform" />
+    <title>ScopeGuard VAPT</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">S</div>
+          <div><strong>ScopeGuard</strong><span>Security assessment platform</span></div>
+        </div>
+        <div class="nav-heading">Workspace</div>
+        <nav class="nav-list" aria-label="Workspace">
+          <button class="nav-item active" data-page="overview"><span aria-hidden="true">⌂</span><span>Dashboard</span></button>
+          <button class="nav-item" data-page="new-assessment"><span aria-hidden="true">＋</span><span>New assessment</span></button>
+          <button class="nav-item" data-page="history"><span aria-hidden="true">◷</span><span>Assessments</span></button>
+          <button class="nav-item" data-page="findings"><span aria-hidden="true">◈</span><span>Findings</span></button>
+          <button class="nav-item" data-page="evidence"><span aria-hidden="true">▣</span><span>Evidence</span></button>
+          <button class="nav-item" data-page="reports"><span aria-hidden="true">↓</span><span>Reports</span></button>
+        </nav>
+        <div class="nav-heading nav-heading-secondary">System</div>
+        <nav class="nav-list" aria-label="System">
+          <button class="nav-item" data-page="settings"><span aria-hidden="true">⚙</span><span>Settings</span></button>
+        </nav>
+        <div class="sidebar-footer">
+          <span class="status-indicator success" aria-hidden="true"></span>
+          <div><strong>Local control plane</strong><span>127.0.0.1 only</span></div>
+        </div>
+      </aside>
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar-leading">
+            <button class="icon-button menu-button" id="menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
+            <div>
+              <p class="eyebrow" id="breadcrumb">Workspace / Dashboard</p>
+              <h1 id="page-title">Assessment dashboard</h1>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <div class="health-chip"><span class="status-indicator success" aria-hidden="true"></span><span id="backend-health">Checking backend</span></div>
+            <button class="button button-primary" data-page="new-assessment"><span aria-hidden="true">＋</span> New assessment</button>
+          </div>
+        </header>
+        <main id="app" class="content" tabindex="-1"></main>
+      </div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="modal" class="modal" hidden>
+      <div class="modal-backdrop" data-close-modal></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <button class="modal-close" data-close-modal aria-label="Close">×</button>
+        <div id="modal-content"></div>
+      </section>
+    </div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

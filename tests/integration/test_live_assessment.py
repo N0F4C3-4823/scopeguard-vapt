@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+import resource
+import time
+
+from app.models import AssessmentCreate
+from app.registry import TESTCASES
+
+
+def _wait_for_terminal(manager, database, assessment_id: str):
+    for _ in range(1800):
+        row = database.get_assessment(assessment_id)
+        if row and row["status"] in {"COMPLETED", "FAILED", "CANCELLED"}:
+            thread = manager._threads.get(assessment_id)
+            if thread:
+                thread.join(timeout=5)
+            return row
+        time.sleep(0.1)
+    raise AssertionError("live local assessment did not reach a terminal state")
+
+
+def test_authorized_local_target_runs_production_live_adapter_path(manager, database, settings):
+    started = time.monotonic()
+    assessment = manager.create(
+        AssessmentCreate(
+            name="Authorized local live adapter audit",
+            targets=["127.0.0.1"],
+            authorized=True,
+            authorization_note="Controlled local loopback service authorization for automated testing",
+            profile="authorized_external",
+            assessment_type="external_unauthenticated",
+        )
+    )
+    manager.start(assessment["id"])
+    final = _wait_for_terminal(manager, database, assessment["id"])
+    assert final["status"] == "COMPLETED"
+    results = database.list_results(assessment["id"])
+    assert len(results) == len(TESTCASES) == 40
+    assert all(row["command"] is not None for row in results if row["status"] not in {"NA"})
+    assert any(row["status"] == "FOUND" for row in results)
+    assert any(row["status"] == "INCONCLUSIVE" for row in results)
+    root = settings.data_dir / "assessments" / assessment["id"]
+    assert (root / "manifest.json").exists()
+    assert (settings.data_dir / "exports" / f"{assessment['id']}.zip").exists()
+    elapsed = time.monotonic() - started
+    peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    assert elapsed < 360, f"controlled live assessment exceeded 6 minutes: {elapsed:.1f}s"
+    assert manager.max_active_commands == 1
+    assert manager.active_commands == 0
+    assert manager.executed_commands >= 34
+    print(f"LIVE_PERFORMANCE elapsed_seconds={elapsed:.2f} peak_rss_mb={peak_rss_mb:.1f} max_active_commands={manager.max_active_commands} executed_commands={manager.executed_commands}")

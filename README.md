@@ -1,0 +1,155 @@
+# ScopeGuard VAPT
+
+ScopeGuard VAPT is a local, evidence-driven network security assessment platform for authorized testing. It provides a guided GUI, bounded scanner execution, capability-aware applicability, deterministic classifications, provenance-preserving evidence, report exports, and optional local Ollama analysis.
+
+This beta release is designed for Linux and Kali/WSL while remaining honest about access-position limitations. It does not turn a timeout, missing tool, filtered port, or model opinion into a security conclusion.
+
+## Quick installation
+
+~~~bash
+git clone https://github.com/OWNER/scopeguard-vapt.git
+cd scopeguard-vapt
+chmod +x install.sh start.sh
+./install.sh
+./start.sh
+~~~
+
+Open http://127.0.0.1:8000. The control plane binds to localhost by default. Use ./start.sh --port 8001 for another local port.
+
+The OWNER placeholder is replaced with the actual private repository owner after publication. Do not run assessments until the targets are explicitly authorized.
+
+## What is included
+
+- Four assessment profiles: external unauthenticated, internal unauthenticated, internal authenticated, and custom/hybrid.
+- Exactly 40 registered testcase records, with 34 live execution adapter paths and six capability-only conditions that require internal, Layer-2, wireless, inventory, egress, or credential-policy capabilities.
+- Target normalization, duplicate detection, bounded CIDR expansion, exclusions, authorization records, and scope locking.
+- Real allowlisted subprocess execution with argv, timeout, exit status, stdout/stderr, tool version, hashes, and provenance.
+- Deterministic FOUND, NOT_FOUND, NA, and INCONCLUSIVE classification. The local LLM is never authoritative.
+- Exact per-testcase POCs/FOUND/ and POCs/NOT_FOUND/ hierarchy. PNG POCs render only the original executed command and captured output.
+- CSV, JSON, summary, raw evidence, manifest, and atomic ZIP exports.
+- Persisted assessment history, live progress, cancellation/recovery handling, and dependency diagnostics.
+- Optional CPU-friendly Ollama support using qwen2.5:1.5b-instruct.
+
+The live adapter and controlled-service validation boundaries are published in docs/live_capability_matrix.json and docs/security_engine_validation_matrix.json. Controlled fixtures demonstrate reproducibility; they are not evidence of vulnerabilities on external systems.
+
+## Screenshots
+
+The repository intentionally does not commit client assessment data or runtime screenshots. To inspect the polished interface, start the application and use a controlled fixture target such as fixture://mixed. The GUI includes Dashboard, the guided assessment wizard, live activity, Results, Evidence, Reports, Tools, and Local AI settings. Any screenshots used for documentation must be produced from fictional fixtures or localhost only.
+
+## System requirements
+
+Minimum:
+
+- Linux with Python 3.11 or newer.
+- 2 GiB RAM for the application without local model inference; more is recommended for Ollama.
+- 2 GiB free disk for dependencies and runtime data.
+- curl for launcher health checks.
+
+Recommended for live adapters:
+
+- Kali Linux, Debian, Ubuntu, Fedora, Arch, openSUSE, or another distribution with a supported package manager.
+- nmap, openssl, curl, dig, and zstd.
+- 4 GiB or more RAM, bounded concurrency, and a local authorized network position.
+- Root or sudo only when a particular scanner capability requires it; the GUI itself binds to localhost and does not require root.
+
+Node.js is not required at runtime because the frontend is shipped as static assets. WSL is supported for external and TCP-oriented checks, but Layer-2, wireless, ICMP, and privileged-network capabilities may be unavailable.
+
+## Local AI
+
+Ollama is optional. The installer can download an official project-local runtime and model after explicit approval:
+
+~~~bash
+SCOPEGUARD_INSTALL_OLLAMA=1 \
+SCOPEGUARD_INSTALL_OLLAMA_MODEL=1 \
+./install.sh
+~~~
+
+The default model is qwen2.5:1.5b-instruct. ScopeGuard limits Ollama to one loaded model and one request at a time. The installer verifies the local API and performs a real inference request. If RAM is insufficient, Ollama is unavailable, or the model is missing, assessment execution continues with AI disabled and the limitation is recorded.
+
+After startup, Settings → Local AI can run the application-level schema and evidence-reference health test. AI output is stored as triage metadata and cannot create, remove, or reclassify a finding.
+
+## First assessment
+
+1. Start ScopeGuard and open the local URL.
+2. Choose New assessment.
+3. Enter a name, then add only authorized targets.
+4. Choose one of the four assessment profiles.
+5. Review scope, capabilities, and bounded scan settings.
+6. Confirm authorization.
+7. Start the assessment.
+8. Watch real backend progress and activity.
+9. Inspect Results and Evidence.
+10. Download the verified report ZIP and CSV files.
+
+For a safe local walkthrough, use fixture://mixed. Fixture output is clearly marked as controlled test evidence and must never be mistaken for a real finding.
+
+## Assessment profiles
+
+External unauthenticated is appropriate for an outside-in view without credentials. Internal unauthenticated and internal authenticated require an authorized internal vantage point and, for authenticated checks, approved credentials. Custom/hybrid lets the operator declare capabilities explicitly.
+
+Internal placement alone is never proof of Layer-2 access, wireless, egress visibility, asset inventory, credentials, or special permissions. Each condition is evaluated separately. Genuinely inapplicable conditions are NA with a precise reason; applicable checks that cannot complete remain INCONCLUSIVE.
+
+## Result classifications
+
+- FOUND — a precise positive condition was proven by complete, validated evidence.
+- NOT_FOUND — a precise negative condition was proven by a successful complete check.
+- NA — the condition is genuinely inapplicable for the selected scope and capabilities.
+- INCONCLUSIVE — evidence is incomplete, blocked, ambiguous, failed, timed out, filtered, or insufficient.
+
+An open port is not automatically a vulnerability. UDP silence is not automatically a closed port. A banner is not automatically a confirmed CVE. LLM text is never a classification authority.
+
+## POC evidence
+
+Every testcase contains the required logical structure:
+
+~~~text
+Testcase_Name/
+└── POCs/
+    ├── FOUND/
+    │   └── Finding_Name/
+    │       └── poc_001.png
+    └── NOT_FOUND/
+        └── Condition_Name/
+            └── poc_001.png
+~~~
+
+The category folders are created for every testcase. Condition folders and PNGs are created only when a matching classification has valid evidence. Each PNG contains only the actual executed command and its actual stdout/stderr. Exit codes, argv, timestamps, hashes, provenance, and explanatory metadata remain outside the PNG.
+
+## Reports
+
+Each completed assessment contains one row for each target × 40 testcases in testcase_results.csv, plus findings.csv, tool_status.csv, llm_triage.csv, assessment_summary.txt, assessment.json, logs, raw command evidence, hashes, manifests, POC folders, and a verified ZIP archive. The GUI exposes only files that exist for the selected assessment.
+
+## Troubleshooting
+
+- Python or venv missing: install Python 3.11+ and its venv package, then rerun ./install.sh.
+- Scanner missing: rerun with SCOPEGUARD_INSTALL_SYSTEM_PACKAGES=1 ./install.sh after reviewing the package list, or install nmap, openssl, curl, dig, and zstd manually.
+- Ollama unavailable: run without AI; use Settings → Local AI for the exact status. Low RAM and WSL memory limits can prevent model loading.
+- WSL networking: WSL may not provide wireless, Layer-2, ICMP, or privileged scan capabilities. ScopeGuard records these as NA or INCONCLUSIVE instead of guessing.
+- Port conflict: stop the existing ScopeGuard process or run ./start.sh --port 8001.
+- Startup failure: inspect data/logs/application.log and data/logs/ollama.log; do not delete assessment data while troubleshooting.
+- Browser issue: use the local URL in a supported browser. Playwright’s root-only fallback is limited to controlled test automation and does not change application scanner security.
+- Recovery: assessment state is persisted in data/scopeguard.sqlite3; interrupted work is not silently marked complete.
+
+## Updating
+
+Stop ScopeGuard, back up data/, pull or extract the new source, and rerun ./install.sh. The installer preserves existing data and migrations are applied by the application. Never overwrite data/ during an upgrade.
+
+## Uninstalling
+
+Stop ScopeGuard, remove the project directory only after exporting any reports you need, and remove the project-local .venv, .tools, and data together with the source. System packages installed for other software are not removed automatically.
+
+## Security and authorization
+
+ScopeGuard is for authorized assessment only. Never add public or third-party targets to automated tests. It does not implement password spraying, credential stuffing, destructive exploitation, DDoS/amplification traffic, file modification, persistence, unauthorized lateral movement, or arbitrary LLM commands. See SECURITY.md.
+
+## Validation status
+
+The current beta validation includes 35 regression tests passed, 2 explicitly skipped when browser E2E is not enabled, and 2 connected-browser E2E tests passed on the controlled local fixture. The controlled engine matrix records 16 live adapters with direct service validation, 18 with execution-path validation, and six capability-dependent conditions. This is not exhaustive real-world vulnerability validation. Read the matrices before using the tool in a pilot.
+
+## Contributing
+
+See CONTRIBUTING.md, AGENTS.md, and skills/scopeguard-qa/SKILL.md. Changes affecting assessment, evidence, classifications, reports, or UI workflows require controlled fixtures and browser validation.
+
+## License
+
+No license has been selected for this private beta. All rights are reserved unless the repository owner adds a license.

@@ -1,0 +1,1242 @@
+{
+  "schema_version": "scopeguard-live-capability-v1",
+  "entries": [
+    {
+      "testcase_id": "01",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ntp_info",
+      "evidence_parser": "nmap_ntp",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "udp_service_state"
+      ],
+      "id": "01",
+      "condition": "NTP_Open_Reflection_Amplification",
+      "verification_logic": "NTP exposure is observed, but amplification is never asserted without a bounded, protocol-specific positive predicate.",
+      "controlled_validation": [
+        "NTP response -> INCONCLUSIVE; silence/malformed response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "02",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_service_fingerprint",
+      "evidence_parser": "nmap_service_fingerprint",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "service_fingerprint"
+      ],
+      "id": "02",
+      "condition": "Fingerprinting_Observation",
+      "verification_logic": "A validated service/version line is an informational observation; origin-IP claims are never inferred.",
+      "controlled_validation": [
+        "HTTP/SSH fingerprint -> FOUND informational; closed ports -> NA"
+      ]
+    },
+    {
+      "testcase_id": "03",
+      "live_status": "CAPABILITY_ONLY",
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "segmentation_testing"
+      ],
+      "required_capabilities": [
+        "internal_vantage"
+      ],
+      "requires_credentials": false,
+      "execution_adapter": "authorized_internal_sensor_required",
+      "evidence_parser": "none",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "applicability_only"
+      ],
+      "id": "03",
+      "condition": "Segmentation_Isolation",
+      "verification_logic": "External or host-only execution cannot establish VLAN isolation; requires an authorized internal vantage and segmentation fixture.",
+      "controlled_validation": [
+        "capability-only; no live sensor"
+      ]
+    },
+    {
+      "testcase_id": "04",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_database_inventory",
+      "evidence_parser": "database_service_inventory",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "service_inventory"
+      ],
+      "id": "04",
+      "condition": "Database_Anonymous_Access",
+      "verification_logic": "Database exposure alone is not anonymous access; an unauthenticated read predicate must be independently established.",
+      "controlled_validation": [
+        "database banner -> INCONCLUSIVE; no database service -> NA"
+      ]
+    },
+    {
+      "testcase_id": "05",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_service_fingerprint",
+      "evidence_parser": "legacy_service_fingerprint",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "service_fingerprint"
+      ],
+      "id": "05",
+      "condition": "Legacy_Protocol",
+      "verification_logic": "Only reliably identified deprecated protocol/service names are reported.",
+      "controlled_validation": [
+        "Telnet/FTP legacy service -> FOUND; modern HTTP inventory -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "06",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ldap_rootdse",
+      "evidence_parser": "ldap_rootdse",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "unauthenticated_directory_query"
+      ],
+      "id": "06",
+      "condition": "LDAP_Unauthenticated_Disclosure",
+      "verification_logic": "RootDSE data is FOUND only when the safe LDAP script captures it; access denial is a completed negative for unauthenticated disclosure.",
+      "controlled_validation": [
+        "LDAP RootDSE response -> FOUND; auth denial/malformed response -> NOT_FOUND or INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "07",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_nbstat",
+      "evidence_parser": "netbios_nbstat",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "udp_service_state"
+      ],
+      "id": "07",
+      "condition": "NetBIOS_Information_Disclosure",
+      "verification_logic": "NetBIOS data is reported only from an actual nbstat response; UDP silence remains inconclusive.",
+      "controlled_validation": [
+        "NetBIOS response -> FOUND; UDP silence/malformed response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "08",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ssl_enum_ciphers",
+      "evidence_parser": "tls_cipher_inventory",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "tls_protocol_inventory"
+      ],
+      "id": "08",
+      "condition": "TLS_Weak_Protocol",
+      "verification_logic": "Deprecated protocol support is FOUND only when the TLS script enumerates it; a complete modern-only enumeration supports NOT_FOUND for that condition.",
+      "controlled_validation": [
+        "modern TLS-only service -> NOT_FOUND; weak/deprecated protocol if supported -> FOUND"
+      ]
+    },
+    {
+      "testcase_id": "09",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_tftp_state",
+      "evidence_parser": "udp_service_state",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "udp_service_state"
+      ],
+      "id": "09",
+      "condition": "TFTP_Read_Exposure",
+      "verification_logic": "TFTP exposure is observed without uploading, overwriting, or claiming file-read access.",
+      "controlled_validation": [
+        "TFTP state response -> INCONCLUSIVE; UDP silence -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "10",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_telnet_banner",
+      "evidence_parser": "telnet_banner",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "plaintext_banner"
+      ],
+      "id": "10",
+      "condition": "Telnet_Plaintext_Exposure",
+      "verification_logic": "Plaintext Telnet behavior is FOUND only from a captured Telnet/banner response; no credentials are attempted.",
+      "controlled_validation": [
+        "Telnet plaintext banner -> FOUND; closed port -> NA"
+      ]
+    },
+    {
+      "testcase_id": "11",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_service_fingerprint",
+      "evidence_parser": "version_corroboration",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "version_observation"
+      ],
+      "id": "11",
+      "condition": "Version_CVE_Applicability",
+      "verification_logic": "Product/version evidence is captured, but no CVE is marked applicable without an advisory-aware verifier.",
+      "controlled_validation": [
+        "specific version banner -> INCONCLUSIVE pending advisory verification"
+      ]
+    },
+    {
+      "testcase_id": "12",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_tcp_state",
+      "evidence_parser": "tcp_port_state",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "tcp_state"
+      ],
+      "id": "12",
+      "condition": "Filtered_Port_Observation",
+      "verification_logic": "Only an explicit filtered/closed/open state for a port included in the completed scan is classified.",
+      "controlled_validation": [
+        "closed/open tested ports -> NOT_FOUND for filtering; filtered state -> FOUND"
+      ]
+    },
+    {
+      "testcase_id": "13",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_snmp_info",
+      "evidence_parser": "snmp_info",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "snmp_query"
+      ],
+      "id": "13",
+      "condition": "SNMP_Public_Community",
+      "verification_logic": "FOUND requires a real SNMP information response to the safe public-community probe; UDP silence is inconclusive.",
+      "controlled_validation": [
+        "SNMP public response -> FOUND; denied/malformed response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "14",
+      "live_status": "CAPABILITY_ONLY",
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "layer2_testing"
+      ],
+      "required_capabilities": [
+        "layer2_access"
+      ],
+      "requires_credentials": false,
+      "execution_adapter": "authorized_layer2_sensor_required",
+      "evidence_parser": "none",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "applicability_only"
+      ],
+      "id": "14",
+      "condition": "ARP_Spoofing_Controls",
+      "verification_logic": "ARP/MAC protections require an authorized local Layer-2 vantage; no poisoning or MITM action is implemented.",
+      "controlled_validation": [
+        "capability-only; no Layer-2 sensor"
+      ]
+    },
+    {
+      "testcase_id": "15",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_http_management_surface",
+      "evidence_parser": "management_surface",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "http_metadata"
+      ],
+      "id": "15",
+      "condition": "Management_Interface",
+      "verification_logic": "Management exposure is reported only for an observed management marker in an actual HTTP response; no credential attack occurs.",
+      "controlled_validation": [
+        "management-title HTTP response -> FOUND; non-management response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "16",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_smb_enum_shares",
+      "evidence_parser": "smb_share_access",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "share_enumeration"
+      ],
+      "id": "16",
+      "condition": "Share_Unauthenticated_Read",
+      "verification_logic": "FOUND requires an actual unauthenticated share/file-access observation; access denial supports NOT_FOUND for that tested condition.",
+      "controlled_validation": [
+        "SMB share service -> FOUND/NOT_FOUND only with real SMB evidence; no SMB -> NA"
+      ]
+    },
+    {
+      "testcase_id": "17",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_snmp_info",
+      "evidence_parser": "snmp_version_posture",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "snmp_query"
+      ],
+      "id": "17",
+      "condition": "SNMP_Version_Posture",
+      "verification_logic": "SNMP version observations are retained, but a version alone is not called a vulnerability.",
+      "controlled_validation": [
+        "SNMP version response -> INCONCLUSIVE observation"
+      ]
+    },
+    {
+      "testcase_id": "18",
+      "live_status": "LIVE",
+      "required_tools": [
+        "curl"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "curl_ftp_anonymous",
+      "evidence_parser": "ftp_anonymous_response",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "anonymous_login_check"
+      ],
+      "id": "18",
+      "condition": "FTP_Anonymous_Exposure",
+      "verification_logic": "FOUND requires a real FTP 230 response to the anonymous login probe; an explicit 530 denial supports NOT_FOUND.",
+      "controlled_validation": [
+        "anonymous FTP read -> FOUND; explicit anonymous denial -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "19",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_tcp_inventory",
+      "evidence_parser": "reachability_observation_only",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "tcp_inventory"
+      ],
+      "id": "19",
+      "condition": "Open_Port_Inventory",
+      "verification_logic": "Reachability is preserved as evidence only; this adapter never turns port reachability alone into FOUND or NOT_FOUND.",
+      "controlled_validation": [
+        "any port inventory -> INCONCLUSIVE; reachability is never a finding"
+      ]
+    },
+    {
+      "testcase_id": "20",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_messaging_inventory",
+      "evidence_parser": "messaging_inventory",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "service_inventory"
+      ],
+      "id": "20",
+      "condition": "Messaging_Endpoint_Auth",
+      "verification_logic": "Endpoint exposure alone is not an unauthenticated data/action finding; no messages are published or changed.",
+      "controlled_validation": [
+        "MQTT/WebSocket exposure -> INCONCLUSIVE without auth/data predicate"
+      ]
+    },
+    {
+      "testcase_id": "21",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_smb_security",
+      "evidence_parser": "smb_security_posture",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "smb_security"
+      ],
+      "id": "21",
+      "condition": "SMB_Signing_Dialect",
+      "verification_logic": "SMB signing/dialect posture is classified only from the safe NSE output; no relay, MITM, or exploit is attempted.",
+      "controlled_validation": [
+        "SMB signing posture -> FOUND/NOT_FOUND only with real SMB NSE output"
+      ]
+    },
+    {
+      "testcase_id": "22",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_service_fingerprint",
+      "evidence_parser": "banner_identity",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "service_fingerprint"
+      ],
+      "id": "22",
+      "condition": "Service_Banner",
+      "verification_logic": "A banner/service identity is FOUND only when nmap captures a non-unknown service identity.",
+      "controlled_validation": [
+        "validated service identity -> FOUND; closed ports -> NA"
+      ]
+    },
+    {
+      "testcase_id": "23",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_rdp_encryption",
+      "evidence_parser": "rdp_nla",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "rdp_security"
+      ],
+      "id": "23",
+      "condition": "RDP_NLA_Posture",
+      "verification_logic": "RDP NLA posture is classified from rdp-enum-encryption output; no credentials are guessed.",
+      "controlled_validation": [
+        "RDP NLA posture -> FOUND/NOT_FOUND only with real RDP NSE output"
+      ]
+    },
+    {
+      "testcase_id": "24",
+      "live_status": "LIVE",
+      "required_tools": [
+        "python"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "python_redis_info_probe",
+      "evidence_parser": "redis_auth",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "redis_safe_query"
+      ],
+      "id": "24",
+      "condition": "Redis_Unauthenticated_Access",
+      "verification_logic": "FOUND requires a real Redis INFO response without an authentication barrier; an explicit -NOAUTH response supports NOT_FOUND. Keys and configuration are never modified.",
+      "controlled_validation": [
+        "unauthenticated Redis INFO -> FOUND; NOAUTH response -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "25",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_mssql_info",
+      "evidence_parser": "mssql_info",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "mssql_safe_query"
+      ],
+      "id": "25",
+      "condition": "MSSQL_PreAuth_Posture",
+      "verification_logic": "MS-SQL pre-auth observations are retained; no password spraying or login guessing is performed.",
+      "controlled_validation": [
+        "MS-SQL info -> INCONCLUSIVE; no authentication attempts"
+      ]
+    },
+    {
+      "testcase_id": "26",
+      "live_status": "CAPABILITY_ONLY",
+      "required_tools": [],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [
+        "credential_policy_testing"
+      ],
+      "required_capabilities": [],
+      "requires_credentials": true,
+      "execution_adapter": "approved_authenticated_policy_sensor_required",
+      "evidence_parser": "none",
+      "supported_profiles": [
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "applicability_only"
+      ],
+      "id": "26",
+      "condition": "Auth_Policy_Observation",
+      "verification_logic": "Brute-force resistance is not tested in unauthenticated mode; approved authenticated policy evidence is required.",
+      "controlled_validation": [
+        "capability-only; no credential guessing"
+      ]
+    },
+    {
+      "testcase_id": "27",
+      "live_status": "LIVE",
+      "required_tools": [
+        "curl"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "curl_http_headers",
+      "evidence_parser": "specific_version_header",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "http_headers"
+      ],
+      "id": "27",
+      "condition": "Specific_Version_Disclosure",
+      "verification_logic": "A numeric product version in an actual response header is FOUND; a completed response without a version is NOT_FOUND for disclosure.",
+      "controlled_validation": [
+        "versioned HTTP header -> FOUND; complete header without version -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "28",
+      "live_status": "CAPABILITY_ONLY",
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "egress_testing"
+      ],
+      "required_capabilities": [
+        "egress_vantage"
+      ],
+      "requires_credentials": false,
+      "execution_adapter": "authorized_internal_egress_sensor_required",
+      "evidence_parser": "none",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "applicability_only"
+      ],
+      "id": "28",
+      "condition": "Egress_Control",
+      "verification_logic": "External-only execution cannot prove internal egress controls; requires an approved internal source and destination fixture.",
+      "controlled_validation": [
+        "capability-only; requires authorized internal egress sensor"
+      ]
+    },
+    {
+      "testcase_id": "29",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ipv6_discovery",
+      "evidence_parser": "ipv6_discovery",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "ipv6_discovery"
+      ],
+      "id": "29",
+      "condition": "IPv6_Exposure",
+      "verification_logic": "Only an actual authorized IPv6 response is recorded; remote router-advertisement security is not inferred.",
+      "controlled_validation": [
+        "IPv6 response -> INCONCLUSIVE observation; no response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "30",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ike_version",
+      "evidence_parser": "vpn_negotiation_observation",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "vpn_observation"
+      ],
+      "id": "30",
+      "condition": "VPN_Configuration",
+      "verification_logic": "IKE/SSL-VPN negotiation data is captured without destructive negotiation or credential attempts; weakness claims remain limited.",
+      "controlled_validation": [
+        "IKE response -> INCONCLUSIVE observation; no response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "31",
+      "live_status": "CAPABILITY_ONLY",
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "inventory_access"
+      ],
+      "required_capabilities": [
+        "asset_inventory"
+      ],
+      "requires_credentials": false,
+      "execution_adapter": "authorized_inventory_sensor_required",
+      "evidence_parser": "none",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "applicability_only"
+      ],
+      "id": "31",
+      "condition": "Inventory_Rogue_Device",
+      "verification_logic": "Rogue-device status requires an authorized asset inventory; a host observed on a network is never guessed to be rogue.",
+      "controlled_validation": [
+        "capability-only; requires authorized asset inventory"
+      ]
+    },
+    {
+      "testcase_id": "32",
+      "live_status": "CAPABILITY_ONLY",
+      "required_tools": [],
+      "required_vantage": [
+        "wireless"
+      ],
+      "required_permissions": [
+        "wireless_testing"
+      ],
+      "required_capabilities": [
+        "wireless_adapter"
+      ],
+      "requires_credentials": false,
+      "execution_adapter": "authorized_wireless_sensor_required",
+      "evidence_parser": "none",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "applicability_only"
+      ],
+      "id": "32",
+      "condition": "Wireless_Posture",
+      "verification_logic": "Wireless posture requires authorized proximity and suitable hardware; WSL limitations are reported rather than bypassed.",
+      "controlled_validation": [
+        "capability-only; requires authorized wireless hardware/proximity"
+      ]
+    },
+    {
+      "testcase_id": "33",
+      "live_status": "LIVE",
+      "required_tools": [
+        "curl"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "curl_http_security_headers",
+      "evidence_parser": "http_security_headers",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "http_headers"
+      ],
+      "id": "33",
+      "condition": "Web_Configuration",
+      "verification_logic": "A response with a missing required security header is FOUND; a complete response with the required header is NOT_FOUND for that precise condition.",
+      "controlled_validation": [
+        "missing X-Content-Type-Options -> FOUND; nosniff present -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "34",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ssh_algorithms",
+      "evidence_parser": "ssh_algorithm_posture",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "ssh_configuration"
+      ],
+      "id": "34",
+      "condition": "SSH_Configuration",
+      "verification_logic": "Weak SSH algorithms are FOUND only when enumerated by ssh2-enum-algos; a complete algorithm list without the tested weak algorithms supports NOT_FOUND.",
+      "controlled_validation": [
+        "weak SSH algorithm listing -> FOUND; modern algorithm list -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "35",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_host_discovery",
+      "evidence_parser": "host_reachability",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "host_discovery"
+      ],
+      "id": "35",
+      "condition": "Reachability_State",
+      "verification_logic": "Host-up is FOUND from a completed multi-signal discovery response; lack of a response remains INCONCLUSIVE.",
+      "controlled_validation": [
+        "completed host-up discovery -> FOUND; no response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "36",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_rpcinfo",
+      "evidence_parser": "rpc_mapping",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "rpc_mapping"
+      ],
+      "id": "36",
+      "condition": "RPC_Endpoint_Disclosure",
+      "verification_logic": "RPC mapping is FOUND only when an actual rpcinfo response discloses a program/endpoint.",
+      "controlled_validation": [
+        "RPC mapping response -> FOUND; no mapper -> NA/INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "37",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_vnc_info",
+      "evidence_parser": "vnc_authentication",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "vnc_configuration"
+      ],
+      "id": "37",
+      "condition": "VNC_Authentication",
+      "verification_logic": "VNC no-auth is FOUND only from vnc-info output; an explicit authentication type supports NOT_FOUND.",
+      "controlled_validation": [
+        "VNC security type None -> FOUND; VNC authentication type -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "38",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_icmp_discovery",
+      "evidence_parser": "icmp_response",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "icmp_discovery"
+      ],
+      "id": "38",
+      "condition": "ICMP_Disclosure",
+      "verification_logic": "An actual ICMP response is recorded as an observation; absence of response is never a negative security conclusion.",
+      "controlled_validation": [
+        "ICMP response -> INCONCLUSIVE observation; no response -> INCONCLUSIVE"
+      ]
+    },
+    {
+      "testcase_id": "39",
+      "live_status": "LIVE",
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "nmap_ssh_algorithms",
+      "evidence_parser": "ssh_vulnerability_posture",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "ssh_configuration"
+      ],
+      "id": "39",
+      "condition": "SSH_Vulnerability",
+      "verification_logic": "Specific SSH cryptographic weaknesses require an actual weak algorithm listing; no duplicate network work is required beyond the valid scan.",
+      "controlled_validation": [
+        "weak SSH algorithm listing -> FOUND; modern algorithm list -> NOT_FOUND"
+      ]
+    },
+    {
+      "testcase_id": "40",
+      "live_status": "LIVE_LIMITED",
+      "required_tools": [
+        "dig"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "execution_adapter": "dig_authorized_dns_query",
+      "evidence_parser": "dns_response",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "coverage": [
+        "command_execution",
+        "dns_query"
+      ],
+      "id": "40",
+      "condition": "DNS_Recursion_Transfer",
+      "verification_logic": "DNS responses are captured, but recursion/zone-transfer conclusions require an explicitly authorized zone and matching evidence.",
+      "controlled_validation": [
+        "DNS response without authorized zone predicate -> INCONCLUSIVE"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1209 @@
+{
+  "schema_version": "scopeguard-security-engine-validation-v1",
+  "registered_testcases": 40,
+  "entries": [
+    {
+      "id": "01",
+      "condition": "NTP_Open_Reflection_Amplification",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_ntp_info",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap ntp-info against local UDP/123 response fixture",
+      "positive_result": "NOT_ASSERTED_SAFE_RESPONSE",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "INCONCLUSIVE_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "NTP exposure is observed, but amplification is never asserted without a bounded, protocol-specific positive predicate."
+    },
+    {
+      "id": "02",
+      "condition": "Fingerprinting_Observation",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_service_fingerprint",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "A validated service/version line is an informational observation; origin-IP claims are never inferred."
+    },
+    {
+      "id": "03",
+      "condition": "Segmentation_Isolation",
+      "live_status": "CAPABILITY_ONLY",
+      "live_adapter": "authorized_internal_sensor_required",
+      "command_path_exercised": false,
+      "controlled_service_validated": false,
+      "actual_test_method": "Capability/applicability decision only; no live command adapter is implemented.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Not applicable: no command evidence is generated for capability-only applicability decisions.",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "segmentation_testing"
+      ],
+      "required_capabilities": [
+        "internal_vantage"
+      ],
+      "requires_credentials": false,
+      "limitations": "External or host-only execution cannot establish VLAN isolation; requires an authorized internal vantage and segmentation fixture."
+    },
+    {
+      "id": "04",
+      "condition": "Database_Anonymous_Access",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_database_inventory",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Database exposure alone is not anonymous access; an unauthenticated read predicate must be independently established."
+    },
+    {
+      "id": "05",
+      "condition": "Legacy_Protocol",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_service_fingerprint",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap service detection against Telnet/HTTP fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Only reliably identified deprecated protocol/service names are reported."
+    },
+    {
+      "id": "06",
+      "condition": "LDAP_Unauthenticated_Disclosure",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_ldap_rootdse",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "RootDSE data is FOUND only when the safe LDAP script captures it; access denial is a completed negative for unauthenticated disclosure."
+    },
+    {
+      "id": "07",
+      "condition": "NetBIOS_Information_Disclosure",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_nbstat",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "NetBIOS data is reported only from an actual nbstat response; UDP silence remains inconclusive."
+    },
+    {
+      "id": "08",
+      "condition": "TLS_Weak_Protocol",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_ssl_enum_ciphers",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap ssl-enum-ciphers against local TLS 1.2 fixture",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Deprecated protocol support is FOUND only when the TLS script enumerates it; a complete modern-only enumeration supports NOT_FOUND for that condition."
+    },
+    {
+      "id": "09",
+      "condition": "TFTP_Read_Exposure",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_tftp_state",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "TFTP exposure is observed without uploading, overwriting, or claiming file-read access."
+    },
+    {
+      "id": "10",
+      "condition": "Telnet_Plaintext_Exposure",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_telnet_banner",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap service detection against local Telnet fixture",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Plaintext Telnet behavior is FOUND only from a captured Telnet/banner response; no credentials are attempted."
+    },
+    {
+      "id": "11",
+      "condition": "Version_CVE_Applicability",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_service_fingerprint",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Product/version evidence is captured, but no CVE is marked applicable without an advisory-aware verifier."
+    },
+    {
+      "id": "12",
+      "condition": "Filtered_Port_Observation",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_tcp_state",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap TCP state scan against local closed/open loopback fixture",
+      "positive_result": "FILTERED_NOT_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Only an explicit filtered/closed/open state for a port included in the completed scan is classified."
+    },
+    {
+      "id": "13",
+      "condition": "SNMP_Public_Community",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_snmp_info",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap SNMP probe against local UDP/161 fixture; malformed NSE response was observed",
+      "positive_result": "INCONCLUSIVE_VALIDATED",
+      "negative_result": "INCONCLUSIVE_VALIDATED",
+      "inconclusive_result": "INCONCLUSIVE_VALIDATED",
+      "malformed_result": "INCONCLUSIVE_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "FOUND requires a real SNMP information response to the safe public-community probe; UDP silence is inconclusive."
+    },
+    {
+      "id": "14",
+      "condition": "ARP_Spoofing_Controls",
+      "live_status": "CAPABILITY_ONLY",
+      "live_adapter": "authorized_layer2_sensor_required",
+      "command_path_exercised": false,
+      "controlled_service_validated": false,
+      "actual_test_method": "Capability/applicability decision only; no live command adapter is implemented.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Not applicable: no command evidence is generated for capability-only applicability decisions.",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "layer2_testing"
+      ],
+      "required_capabilities": [
+        "layer2_access"
+      ],
+      "requires_credentials": false,
+      "limitations": "ARP/MAC protections require an authorized local Layer-2 vantage; no poisoning or MITM action is implemented."
+    },
+    {
+      "id": "15",
+      "condition": "Management_Interface",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_http_management_surface",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap HTTP title/headers against management and non-management HTTP fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "INCONCLUSIVE_VALIDATED",
+      "inconclusive_result": "INCONCLUSIVE_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Management exposure is reported only for an observed management marker in an actual HTTP response; no credential attack occurs."
+    },
+    {
+      "id": "16",
+      "condition": "Share_Unauthenticated_Read",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_smb_enum_shares",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "FOUND requires an actual unauthenticated share/file-access observation; access denial supports NOT_FOUND for that tested condition."
+    },
+    {
+      "id": "17",
+      "condition": "SNMP_Version_Posture",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_snmp_info",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "SNMP version observations are retained, but a version alone is not called a vulnerability."
+    },
+    {
+      "id": "18",
+      "condition": "FTP_Anonymous_Exposure",
+      "live_status": "LIVE",
+      "live_adapter": "curl_ftp_anonymous",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual curl anonymous FTP listing against local FTP/21 fixture",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "curl"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "FOUND requires a real FTP 230 response to the anonymous login probe; an explicit 530 denial supports NOT_FOUND."
+    },
+    {
+      "id": "19",
+      "condition": "Open_Port_Inventory",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_tcp_inventory",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap TCP inventory against local loopback fixture",
+      "positive_result": "NOT_A_SECURITY_FINDING",
+      "negative_result": "NOT_A_SECURITY_FINDING",
+      "inconclusive_result": "INCONCLUSIVE_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Reachability is preserved as evidence only; this adapter never turns port reachability alone into FOUND or NOT_FOUND."
+    },
+    {
+      "id": "20",
+      "condition": "Messaging_Endpoint_Auth",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_messaging_inventory",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Endpoint exposure alone is not an unauthenticated data/action finding; no messages are published or changed."
+    },
+    {
+      "id": "21",
+      "condition": "SMB_Signing_Dialect",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_smb_security",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "SMB signing/dialect posture is classified only from the safe NSE output; no relay, MITM, or exploit is attempted."
+    },
+    {
+      "id": "22",
+      "condition": "Service_Banner",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_service_fingerprint",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "A banner/service identity is FOUND only when nmap captures a non-unknown service identity."
+    },
+    {
+      "id": "23",
+      "condition": "RDP_NLA_Posture",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_rdp_encryption",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "RDP NLA posture is classified from rdp-enum-encryption output; no credentials are guessed."
+    },
+    {
+      "id": "24",
+      "condition": "Redis_Unauthenticated_Access",
+      "live_status": "LIVE",
+      "live_adapter": "python_redis_info_probe",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual bounded Python Redis INFO protocol probe against local Redis RESP fixture",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "python"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "FOUND requires a real Redis INFO response without an authentication barrier; an explicit -NOAUTH response supports NOT_FOUND. Keys and configuration are never modified."
+    },
+    {
+      "id": "25",
+      "condition": "MSSQL_PreAuth_Posture",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_mssql_info",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "MS-SQL pre-auth observations are retained; no password spraying or login guessing is performed."
+    },
+    {
+      "id": "26",
+      "condition": "Auth_Policy_Observation",
+      "live_status": "CAPABILITY_ONLY",
+      "live_adapter": "approved_authenticated_policy_sensor_required",
+      "command_path_exercised": false,
+      "controlled_service_validated": false,
+      "actual_test_method": "Capability/applicability decision only; no live command adapter is implemented.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Not applicable: no command evidence is generated for capability-only applicability decisions.",
+      "supported_profiles": [
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [
+        "credential_policy_testing"
+      ],
+      "required_capabilities": [],
+      "requires_credentials": true,
+      "limitations": "Brute-force resistance is not tested in unauthenticated mode; approved authenticated policy evidence is required."
+    },
+    {
+      "id": "27",
+      "condition": "Specific_Version_Disclosure",
+      "live_status": "LIVE",
+      "live_adapter": "curl_http_headers",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual curl HTTP response against versioned, unversioned, and malformed local HTTP fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "INCONCLUSIVE_VALIDATED",
+      "malformed_result": "INCONCLUSIVE_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "curl"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "A numeric product version in an actual response header is FOUND; a completed response without a version is NOT_FOUND for disclosure."
+    },
+    {
+      "id": "28",
+      "condition": "Egress_Control",
+      "live_status": "CAPABILITY_ONLY",
+      "live_adapter": "authorized_internal_egress_sensor_required",
+      "command_path_exercised": false,
+      "controlled_service_validated": false,
+      "actual_test_method": "Capability/applicability decision only; no live command adapter is implemented.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Not applicable: no command evidence is generated for capability-only applicability decisions.",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "egress_testing"
+      ],
+      "required_capabilities": [
+        "egress_vantage"
+      ],
+      "requires_credentials": false,
+      "limitations": "External-only execution cannot prove internal egress controls; requires an approved internal source and destination fixture."
+    },
+    {
+      "id": "29",
+      "condition": "IPv6_Exposure",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_ipv6_discovery",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Only an actual authorized IPv6 response is recorded; remote router-advertisement security is not inferred."
+    },
+    {
+      "id": "30",
+      "condition": "VPN_Configuration",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_ike_version",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "IKE/SSL-VPN negotiation data is captured without destructive negotiation or credential attempts; weakness claims remain limited."
+    },
+    {
+      "id": "31",
+      "condition": "Inventory_Rogue_Device",
+      "live_status": "CAPABILITY_ONLY",
+      "live_adapter": "authorized_inventory_sensor_required",
+      "command_path_exercised": false,
+      "controlled_service_validated": false,
+      "actual_test_method": "Capability/applicability decision only; no live command adapter is implemented.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Not applicable: no command evidence is generated for capability-only applicability decisions.",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [],
+      "required_vantage": [
+        "internal"
+      ],
+      "required_permissions": [
+        "inventory_access"
+      ],
+      "required_capabilities": [
+        "asset_inventory"
+      ],
+      "requires_credentials": false,
+      "limitations": "Rogue-device status requires an authorized asset inventory; a host observed on a network is never guessed to be rogue."
+    },
+    {
+      "id": "32",
+      "condition": "Wireless_Posture",
+      "live_status": "CAPABILITY_ONLY",
+      "live_adapter": "authorized_wireless_sensor_required",
+      "command_path_exercised": false,
+      "controlled_service_validated": false,
+      "actual_test_method": "Capability/applicability decision only; no live command adapter is implemented.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Not applicable: no command evidence is generated for capability-only applicability decisions.",
+      "supported_profiles": [
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [],
+      "required_vantage": [
+        "wireless"
+      ],
+      "required_permissions": [
+        "wireless_testing"
+      ],
+      "required_capabilities": [
+        "wireless_adapter"
+      ],
+      "requires_credentials": false,
+      "limitations": "Wireless posture requires authorized proximity and suitable hardware; WSL limitations are reported rather than bypassed."
+    },
+    {
+      "id": "33",
+      "condition": "Web_Configuration",
+      "live_status": "LIVE",
+      "live_adapter": "curl_http_security_headers",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual curl HTTP response against missing/present X-Content-Type-Options local fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "curl"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "A response with a missing required security header is FOUND; a complete response with the required header is NOT_FOUND for that precise condition."
+    },
+    {
+      "id": "34",
+      "condition": "SSH_Configuration",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_ssh_algorithms",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap ssh2-enum-algos against OpenSSH modern and weak-algorithm local fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Weak SSH algorithms are FOUND only when enumerated by ssh2-enum-algos; a complete algorithm list without the tested weak algorithms supports NOT_FOUND."
+    },
+    {
+      "id": "35",
+      "condition": "Reachability_State",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_host_discovery",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap multi-signal host discovery against authorized loopback",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Host-up is FOUND from a completed multi-signal discovery response; lack of a response remains INCONCLUSIVE."
+    },
+    {
+      "id": "36",
+      "condition": "RPC_Endpoint_Disclosure",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_rpcinfo",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "RPC mapping is FOUND only when an actual rpcinfo response discloses a program/endpoint."
+    },
+    {
+      "id": "37",
+      "condition": "VNC_Authentication",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_vnc_info",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap vnc-info against local VNC None/VNCAuth fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "VNC no-auth is FOUND only from vnc-info output; an explicit authentication type supports NOT_FOUND."
+    },
+    {
+      "id": "38",
+      "condition": "ICMP_Disclosure",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "nmap_icmp_discovery",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "An actual ICMP response is recorded as an observation; absence of response is never a negative security conclusion."
+    },
+    {
+      "id": "39",
+      "condition": "SSH_Vulnerability",
+      "live_status": "LIVE",
+      "live_adapter": "nmap_ssh_algorithms",
+      "command_path_exercised": true,
+      "controlled_service_validated": true,
+      "actual_test_method": "actual nmap ssh2-enum-algos reused against OpenSSH modern and weak-algorithm local fixtures",
+      "positive_result": "FOUND_VALIDATED",
+      "negative_result": "NOT_FOUND_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "nmap"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "Specific SSH cryptographic weaknesses require an actual weak algorithm listing; no duplicate network work is required beyond the valid scan."
+    },
+    {
+      "id": "40",
+      "condition": "DNS_Recursion_Transfer",
+      "live_status": "LIVE_LIMITED",
+      "live_adapter": "dig_authorized_dns_query",
+      "command_path_exercised": true,
+      "controlled_service_validated": false,
+      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "positive_result": "NOT_VALIDATED",
+      "negative_result": "NOT_VALIDATED",
+      "inconclusive_result": "NOT_VALIDATED",
+      "malformed_result": "NOT_VALIDATED",
+      "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
+      "supported_profiles": [
+        "external_unauthenticated",
+        "internal_unauthenticated",
+        "internal_authenticated",
+        "custom_hybrid"
+      ],
+      "required_tools": [
+        "dig"
+      ],
+      "required_vantage": [
+        "external"
+      ],
+      "required_permissions": [],
+      "required_capabilities": [],
+      "requires_credentials": false,
+      "limitations": "DNS responses are captured, but recursion/zone-transfer conclusions require an explicitly authorized zone and matching evidence."
+    }
+  ]
+}
