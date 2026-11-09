@@ -47,5 +47,15 @@ def test_authorized_local_target_runs_production_live_adapter_path(manager, data
     assert elapsed < 360, f"controlled live assessment exceeded 6 minutes: {elapsed:.1f}s"
     assert manager.max_active_commands == 1
     assert manager.active_commands == 0
-    assert manager.executed_commands >= 34
+    discovery_executions = [
+        execution for execution in database.list_executions(assessment["id"])
+        if execution["testcase_id"].startswith("DISCOVERY_")
+    ]
+    adapter_executions = [
+        execution for execution in database.list_executions(assessment["id"])
+        if not execution["testcase_id"].startswith("DISCOVERY_")
+    ]
+    assert len(discovery_executions) == 2
+    assert len(adapter_executions) == sum(1 for row in results if row["command"] is not None)
+    assert manager.executed_commands == len(discovery_executions) + len(adapter_executions)
     print(f"LIVE_PERFORMANCE elapsed_seconds={elapsed:.2f} peak_rss_mb={peak_rss_mb:.1f} max_active_commands={manager.max_active_commands} executed_commands={manager.executed_commands}")

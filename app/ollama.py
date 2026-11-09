@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from .models import TriageModel
+from .recovery import ACTION_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -107,9 +108,14 @@ class OllamaClient:
         schema = TriageModel.model_json_schema()
         schema["properties"]["suggested_action_id"] = {
             "anyOf": [
-                {"type": "string", "enum": ["collect_safe_banner", "retry_safe_probe", "inspect_existing_evidence"]},
+                {"type": "string", "enum": sorted(ACTION_REGISTRY)},
                 {"type": "null"},
             ]
+        }
+        schema["properties"]["parameters"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}},
         }
         response = httpx.post(
             f"{self.url}/api/generate",
@@ -127,11 +133,12 @@ class OllamaClient:
         generated = response.json().get("response", "")
         payload: dict[str, Any] = json.loads(generated)
         triage = TriageModel.model_validate(payload)
-        allowed_actions = {None, "collect_safe_banner", "retry_safe_probe", "inspect_existing_evidence"}
+        allowed_actions = {None, *ACTION_REGISTRY}
         if (
             triage.testcase_id != testcase_id
             or not set(triage.observation_ids).issubset(observation_ids)
             or triage.suggested_action_id not in allowed_actions
+            or set(triage.parameters) - {"port"}
         ):
             raise ValueError("Ollama response referenced unknown testcase or observation")
         return triage

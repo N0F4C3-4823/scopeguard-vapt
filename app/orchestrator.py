@@ -14,6 +14,12 @@ from .commands import CommandResult, run_command, sha256_bytes
 from .config import Settings
 from .db import Database, now_iso
 from .descriptions import two_line_description
+from .discovery import (
+    DiscoverySnapshot,
+    build_discovery_commands,
+    parse_discovery_result,
+    service_gate,
+)
 from .evidence import safe_name, write_applicability_evidence, write_testcase_evidence
 from .exporter import export_assessment
 from .live_adapters import adapter_for, build_command
@@ -38,6 +44,7 @@ class AssessmentManager:
         self.active_commands = 0
         self.max_active_commands = 0
         self.executed_commands = 0
+        self._ai_cache: dict[str, object] = {}
         self._reconcile_interrupted_assessments()
 
     def _reconcile_interrupted_assessments(self) -> None:
@@ -280,6 +287,165 @@ class AssessmentManager:
         self.db.add_event(assessment_id, "assessment_resumed", "Security Checks", "Assessment resumed.")
         return True
 
+    @staticmethod
+    def _block_final_verdict(classification, reason: str):
+        """Remove certification when mandatory evidence generation failed."""
+        if isinstance(classification, SimpleNamespace):
+            classification.status = "INCONCLUSIVE"
+            classification.final_verdict = None
+            classification.coverage_status = "BLOCKED"
+            classification.coverage_reason = reason
+            classification.failure_reason = reason
+            classification.validation_state = "EVIDENCE_INCOMPLETE"
+            classification.reportable_finding = False
+            classification.inconclusive_conditions = tuple(getattr(classification, "conditions_tested", ()))
+            return classification
+        return replace(
+            classification,
+            status="INCONCLUSIVE",
+            final_verdict=None,
+            coverage_status="BLOCKED",
+            coverage_reason=reason,
+            failure_reason=reason,
+            validation_state="EVIDENCE_INCOMPLETE",
+            reportable_finding=False,
+            inconclusive_conditions=classification.conditions_tested,
+        )
+
+    def _discover_target(
+        self,
+        assessment_id: str,
+        target: dict,
+        assessment_root,
+        cancel: threading.Event,
+    ) -> DiscoverySnapshot:
+        """Run bounded TCP and UDP discovery once and persist its provenance."""
+        tcp_argv, udp_argv = build_discovery_commands(
+            target["value"],
+            host_timeout_seconds=self.settings.scanner_host_timeout_seconds,
+            max_retries=self.settings.scanner_max_retries,
+            script_timeout_seconds=self.settings.nmap_script_timeout_seconds,
+        )
+        target_root = assessment_root / self._target_dir_name(target) / "discovery"
+        target_root.mkdir(parents=True, exist_ok=True)
+        results: dict[str, CommandResult] = {}
+        parsed: dict[str, tuple[tuple, bool, str | None]] = {}
+        for protocol, argv in (("tcp", tcp_argv), ("udp", udp_argv)):
+            if cancel.is_set():
+                parsed[protocol] = ((), False, "discovery cancelled before the protocol scan completed")
+                continue
+            self.db.add_event(
+                assessment_id,
+                "discovery_probe_started",
+                "Discovery",
+                f"Running bounded {protocol.upper()} service discovery for {target['value']}.",
+                target_id=target["id"],
+            )
+            timeout = max(
+                self.settings.live_limited_command_timeout,
+                self.settings.scanner_host_timeout_seconds + self.settings.scanner_command_grace_seconds,
+            )
+            result = self._run_argv(argv, timeout)
+            results[protocol] = result
+            observations, complete, failure = parse_discovery_result(result, protocol)
+            parsed[protocol] = (observations, complete, failure)
+            protocol_dir = target_root / protocol
+            protocol_dir.mkdir(parents=True, exist_ok=True)
+            (protocol_dir / "stdout.bin").write_bytes(result.stdout)
+            (protocol_dir / "stderr.bin").write_bytes(result.stderr)
+            (protocol_dir / "commands.json").write_text(
+                json.dumps(
+                    {
+                        "command_id": result.id,
+                        "argv": list(result.argv),
+                        "displayed_command": result.displayed_command,
+                        "exit_code": result.exit_code,
+                        "timed_out": result.timed_out,
+                        "execution_status": result.status,
+                        "tool_version": result.tool_version,
+                        "stdout_sha256": result.stdout_sha256,
+                        "stderr_sha256": result.stderr_sha256,
+                        "combined_sha256": result.combined_sha256,
+                        "protocol": protocol,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            relative_stdout = str((protocol_dir / "stdout.bin").relative_to(assessment_root))
+            relative_stderr = str((protocol_dir / "stderr.bin").relative_to(assessment_root))
+            self.db.add_execution(
+                {
+                    "id": result.id,
+                    "assessment_id": assessment_id,
+                    "target_id": target["id"],
+                    "testcase_id": f"DISCOVERY_{protocol.upper()}",
+                    "command_json": json.dumps(list(result.argv)),
+                    "displayed_command": result.displayed_command,
+                    "cwd": result.cwd,
+                    "started_at": result.started_at,
+                    "ended_at": result.ended_at,
+                    "exit_code": result.exit_code,
+                    "timed_out": int(result.timed_out),
+                    "tool_version": result.tool_version,
+                    "stdout_path": relative_stdout,
+                    "stderr_path": relative_stderr,
+                    "stdout_sha256": result.stdout_sha256,
+                    "stderr_sha256": result.stderr_sha256,
+                    "combined_sha256": result.combined_sha256,
+                    "execution_status": result.status,
+                }
+            )
+            self.db.add_event(
+                assessment_id,
+                "discovery_probe_completed",
+                "Discovery",
+                failure or f"{protocol.upper()} discovery completed with {len(observations)} explicit port observations.",
+                status="COMPLETED" if complete else "INCONCLUSIVE",
+                target_id=target["id"],
+                payload={
+                    "protocol": protocol,
+                    "observations": [item.as_dict() for item in observations],
+                    "failure": failure,
+                },
+            )
+        tcp_observations, tcp_complete, tcp_failure = parsed.get("tcp", ((), False, "TCP discovery was not executed"))
+        udp_observations, udp_complete, udp_failure = parsed.get("udp", ((), False, "UDP discovery was not executed"))
+        tcp_result = results.get("tcp")
+        udp_result = results.get("udp")
+        combined_text = "".join(
+            (item.stdout + item.stderr).decode("utf-8", errors="replace")
+            for item in results.values()
+        ).lower()
+        if "host is up" in combined_text:
+            host_state = "HOST_REACHABLE"
+        elif "host seems down" in combined_text and tcp_complete and udp_complete:
+            host_state = "HOST_UNREACHABLE"
+        else:
+            host_state = "HOST_INDETERMINATE"
+        snapshot = DiscoverySnapshot(
+            target=target["value"],
+            tcp=tuple(tcp_observations),
+            udp=tuple(udp_observations),
+            tcp_complete=tcp_complete,
+            udp_complete=udp_complete,
+            host_state=host_state,
+            tcp_command_id=tcp_result.id if tcp_result else None,
+            udp_command_id=udp_result.id if udp_result else None,
+            tcp_failure=tcp_failure,
+            udp_failure=udp_failure,
+        )
+        (target_root / "discovery.json").write_text(json.dumps(snapshot.as_dict(), indent=2), encoding="utf-8")
+        self.db.add_event(
+            assessment_id,
+            "discovery_snapshot_saved",
+            "Discovery",
+            f"Saved protocol-aware discovery for {target['value']} ({host_state}).",
+            target_id=target["id"],
+            payload=snapshot.as_dict(),
+        )
+        return snapshot
+
     def _run(self, assessment_id: str, cancel: threading.Event, pause: threading.Event) -> None:
         assessment = self.db.get_assessment(assessment_id)
         if not assessment:
@@ -290,7 +456,7 @@ class AssessmentManager:
         error_count = 0
         applicable_count = 0
         completed = 0
-        pending_triage: list[tuple[int, str, list[str], str]] = []
+        discovery: dict[str, DiscoverySnapshot] = {}
         try:
             self.db.update_assessment(assessment_id, status="RUNNING", started_at=now_iso(), current_phase="Preflight")
             self.db.add_event(assessment_id, "phase_started", "Preflight", "Preflight checks completed.")
@@ -299,7 +465,25 @@ class AssessmentManager:
             self.db.update_assessment(assessment_id, current_phase="Scope Validation")
             self.db.add_event(assessment_id, "phase_completed", "Scope Validation", "Authorized scope and capability manifest was persisted before execution.")
             self.db.update_assessment(assessment_id, current_phase="Discovery")
-            self.db.add_event(assessment_id, "phase_completed", "Discovery", "Scope discovery stage completed.")
+            for target in targets:
+                if target["kind"] == "fixture":
+                    self.db.add_event(
+                        assessment_id,
+                        "discovery_skipped",
+                        "Discovery",
+                        "Controlled fixture discovery is represented by the fixture contract.",
+                        target_id=target["id"],
+                    )
+                    continue
+                if cancel.is_set():
+                    break
+                discovery[target["id"]] = self._discover_target(assessment_id, target, assessment_root, cancel)
+            self.db.add_event(
+                assessment_id,
+                "phase_completed",
+                "Discovery",
+                "Protocol-aware TCP and UDP discovery completed; incomplete scans remain explicit limitations.",
+            )
             self.db.update_assessment(assessment_id, current_phase="Service Enumeration")
             self.db.add_event(assessment_id, "phase_completed", "Service Enumeration", "Service selection uses the canonical testcase registry.")
             for target in targets:
@@ -324,6 +508,10 @@ class AssessmentManager:
                         controlled_fixture=target["kind"] == "fixture",
                     )
                     decision = evaluate_applicability(testcase, assessment["assessment_type"], capabilities)
+                    if decision.state == "APPLICABLE" and target["kind"] != "fixture":
+                        gate = service_gate(testcase.id, discovery.get(target["id"])) if target["id"] in discovery else None
+                        if gate and gate[0] == "NA":
+                            decision = replace(decision, state="NA", reason=gate[1], missing=())
                     command_result: CommandResult | None = None
                     if decision.state == "APPLICABLE":
                         applicable_count += 1
@@ -380,18 +568,57 @@ class AssessmentManager:
                             description_line_2=description_line_2,
                         )
                     if decision.state == "APPLICABLE":
-                        artifact = write_testcase_evidence(
-                            assessment_root,
-                            self._target_dir_name(target),
-                            testcase,
-                            command_result,
-                            classification,
-                            target_value=target["value"],
-                            target_id=target["id"],
-                            fixture_id=target["value"] if target["kind"] == "fixture" else None,
-                            create_screenshots=bool(assessment["evidence_screenshots"]),
-                            recovery_attempts=recovery_attempts,
-                        )
+                        if classification.final_verdict in {"FOUND", "NOT_FOUND"} and not assessment["evidence_screenshots"]:
+                            classification = self._block_final_verdict(classification, "POC evidence generation is disabled for this assessment; the security verdict remains uncertified")
+                            description_line_1, description_line_2 = two_line_description(
+                                testcase_id=testcase.id,
+                                testcase_name=testcase.name,
+                                condition=testcase.condition,
+                                verdict=classification.final_verdict,
+                                observation_type=classification.observation_type,
+                                target=target["label"] or target["value"],
+                                applicability=classification.applicability,
+                            )
+                            classification = replace(classification, description_line_1=description_line_1, description_line_2=description_line_2)
+                        try:
+                            artifact = write_testcase_evidence(
+                                assessment_root,
+                                self._target_dir_name(target),
+                                testcase,
+                                command_result,
+                                classification,
+                                target_value=target["value"],
+                                target_id=target["id"],
+                                fixture_id=target["value"] if target["kind"] == "fixture" else None,
+                                create_screenshots=bool(assessment["evidence_screenshots"]),
+                                recovery_attempts=recovery_attempts,
+                            )
+                        except Exception as error:
+                            if classification.final_verdict not in {"FOUND", "NOT_FOUND"}:
+                                raise
+                            classification = self._block_final_verdict(classification, f"POC evidence generation failed: {type(error).__name__}")
+                            description_line_1, description_line_2 = two_line_description(
+                                testcase_id=testcase.id,
+                                testcase_name=testcase.name,
+                                condition=testcase.condition,
+                                verdict=classification.final_verdict,
+                                observation_type=classification.observation_type,
+                                target=target["label"] or target["value"],
+                                applicability=classification.applicability,
+                            )
+                            classification = replace(classification, description_line_1=description_line_1, description_line_2=description_line_2)
+                            artifact = write_testcase_evidence(
+                                assessment_root,
+                                self._target_dir_name(target),
+                                testcase,
+                                command_result,
+                                classification,
+                                target_value=target["value"],
+                                target_id=target["id"],
+                                fixture_id=target["value"] if target["kind"] == "fixture" else None,
+                                create_screenshots=False,
+                                recovery_attempts=recovery_attempts,
+                            )
                     else:
                         artifact = write_applicability_evidence(
                             assessment_root,
@@ -444,6 +671,16 @@ class AssessmentManager:
                     result_id = self.db.add_result(result_row)
                     for audit in recovery_audits:
                         self.db.add_ai_recovery({**audit, "result_id": result_id})
+                        if audit.get("validation_state") == "VALIDATED":
+                            self.db.add_llm_triage({
+                                "assessment_id": assessment_id,
+                                "result_id": result_id,
+                                "model": self.ollama.model,
+                                "prompt_version": "scopeguard-recovery-v1",
+                                "response_json": audit.get("response_json", "{}"),
+                                "validation_state": "VALIDATED",
+                                "created_at": audit.get("created_at", now_iso()),
+                            })
                     if command_result is not None:
                         self.db.add_execution({
                             "id": command_result.id,
@@ -536,43 +773,16 @@ class AssessmentManager:
             self.db.update_assessment(assessment_id, current_phase="Evidence Verification")
             self.db.add_event(assessment_id, "phase_completed", "Evidence Verification", "Evidence hashes and provenance were persisted.")
             self.db.update_assessment(assessment_id, current_phase="AI Triage")
-            if assessment["llm_enabled"] and pending_triage:
-                self.db.add_event(assessment_id, "phase_started", "AI Triage", f"Analyzing {len(pending_triage)} inconclusive result(s) with the optional local model.")
-                for result_id, testcase_id, observation_ids, evidence in pending_triage:
-                    try:
-                        triage = self.ollama.triage(
-                            testcase_id=testcase_id,
-                            observation_ids=observation_ids,
-                            evidence=evidence,
-                        )
-                        self.db.add_llm_triage({
-                            "assessment_id": assessment_id,
-                            "result_id": result_id,
-                            "model": self.ollama.model,
-                            "prompt_version": "scopeguard-triage-v1",
-                            "response_json": json.dumps(triage.model_dump(), ensure_ascii=False),
-                            "validation_state": "VALIDATED",
-                            "created_at": now_iso(),
-                        })
-                        self.db.add_event(
-                            assessment_id,
-                            "llm_triage_completed",
-                            "AI Triage",
-                            f"Validated secondary explanation stored for testcase {testcase_id}; deterministic classification unchanged.",
-                            testcase_id=testcase_id,
-                        )
-                    except Exception as error:
-                        self.db.add_event(
-                            assessment_id,
-                            "llm_triage_failed",
-                            "AI Triage",
-                            f"Local AI analysis unavailable for testcase {testcase_id}; deterministic result preserved.",
-                            testcase_id=testcase_id,
-                            payload={"error_type": type(error).__name__, "error": str(error)[:240]},
-                        )
-                self.db.add_event(assessment_id, "phase_completed", "AI Triage", "Optional local AI analysis completed without changing deterministic classifications.")
+            recovery_count = len(self.db.list_ai_recovery(assessment_id))
+            if assessment["llm_enabled"] and recovery_count:
+                self.db.add_event(
+                    assessment_id,
+                    "phase_completed",
+                    "AI Triage",
+                    f"Automatic discrepancy analysis completed for {recovery_count} captured discrepancy record(s); deterministic classifications remain authoritative.",
+                )
             else:
-                reason = "disabled by assessment configuration" if not assessment["llm_enabled"] else "no inconclusive evidence required secondary analysis"
+                reason = "disabled by assessment configuration" if not assessment["llm_enabled"] else "no discrepancies required secondary analysis"
                 self.db.add_event(assessment_id, "phase_skipped", "AI Triage", f"Optional local AI skipped: {reason}.")
             self.db.update_assessment(assessment_id, current_phase="Report Generation")
             self.db.add_event(assessment_id, "phase_completed", "Report Generation", "Report inputs are complete.")
@@ -657,11 +867,15 @@ class AssessmentManager:
         validation_state = "REJECTED"
         outcome = "AI_UNAVAILABLE"
         try:
-            triage = self.ollama.triage(
-                testcase_id=testcase.id,
-                observation_ids=list(getattr(classification, "observation_ids", ())),
-                evidence=evidence,
-            )
+            cache_key = sha256_bytes(evidence.encode("utf-8", errors="replace"))
+            triage = self._ai_cache.get(cache_key)
+            if triage is None:
+                triage = self.ollama.triage(
+                    testcase_id=testcase.id,
+                    observation_ids=list(getattr(classification, "observation_ids", ())),
+                    evidence=evidence,
+                )
+                self._ai_cache[cache_key] = triage
             response_payload = triage.model_dump()
             action_id = triage.suggested_action_id
             validation_state = "VALIDATED"
@@ -676,6 +890,7 @@ class AssessmentManager:
             target=target["value"],
             settings=self.settings,
             attempt=0,
+            parameters=dict(getattr(triage, "parameters", {})) if "triage" in locals() else None,
         )
         if plan.argv:
             self.db.add_event(assessment["id"], "ai_corrective_check_selected", "AI Triage", plan.reason, testcase_id=testcase.id, target_id=target["id"])

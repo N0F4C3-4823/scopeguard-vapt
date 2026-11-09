@@ -115,6 +115,30 @@ def _validate_result_coverage(results: list[dict[str, Any]], targets: list[dict[
         raise ExportError("Export refused: testcase result coverage is incomplete or duplicated")
 
 
+def _validate_finalized_artifacts(assessment_root: Path, results: list[dict[str, Any]]) -> None:
+    """Fail closed if a certified result lacks the required evidence artifact."""
+    for result in results:
+        verdict = result.get("final_verdict")
+        pocs = result.get("poc_paths_json") or []
+        if verdict in {"FOUND", "NOT_FOUND"}:
+            if not pocs:
+                raise ExportError(
+                    f"Export refused: finalized {verdict} result {result['target_id']}/{result['testcase_id']} has no POC"
+                )
+            for relative in pocs:
+                path = assessment_root / relative
+                if path.suffix.lower() != ".png" or path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+                    raise ExportError(f"Export refused: invalid POC artifact {relative}")
+        elif verdict == "NA" and pocs:
+            raise ExportError(f"Export refused: NA result {result['target_id']}/{result['testcase_id']} has a POC")
+        if verdict in {"FOUND", "NOT_FOUND", "NA"}:
+            line_1, line_2 = _description(result)
+            if not validate_two_line_description(line_1, line_2):
+                raise ExportError(
+                    f"Export refused: finalized result {result['target_id']}/{result['testcase_id']} lacks two-line explanation"
+                )
+
+
 def _result_row(result: dict[str, Any]) -> list[str]:
     description_line_1, description_line_2 = _description(result)
     return [
@@ -250,6 +274,7 @@ def export_assessment(
     assessment_root = data_dir / "assessments" / assessment_id
     if assessment_root.is_symlink() or not assessment_root.is_dir():
         raise ExportError("Evidence root is missing")
+    _validate_finalized_artifacts(assessment_root, results)
     for result in results:
         expected_prefix = target_dir_name(next(target for target in targets if target["id"] == result["target_id"]))
         for relative in result["evidence_paths_json"] + result["poc_paths_json"]:
@@ -430,6 +455,7 @@ def export_target(
     if len(results) != len(TESTCASES):
         raise ExportError("Target export refused: testcase result coverage is incomplete")
     assessment_root = data_dir / "assessments" / assessment_id
+    _validate_finalized_artifacts(assessment_root, results)
     target_root = _write_target_exports(assessment_root, target, results)
     archive_path = data_dir / "exports" / f"{assessment_id}-{target_id}.zip"
     archive_path.parent.mkdir(parents=True, exist_ok=True)

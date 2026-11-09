@@ -29,6 +29,9 @@ The repository is private to the authenticated owner. Do not run assessments unt
 - CSV, JSON, summary, raw evidence, manifest, and atomic ZIP exports.
 - Persisted assessment history, live progress, cancellation/recovery handling, and dependency diagnostics.
 - Optional CPU-friendly Ollama support using qwen2.5:1.5b-instruct.
+- Service-first discovery keeps TCP and UDP observations separate and avoids using UDP silence as a generic explanation for TCP checks.
+- Target-wise results keep each target's 40 testcase rows, evidence, POCs, and downloads isolated.
+- Finalized FOUND and NOT_FOUND rows expose View POC, Download POC, and browser PNG clipboard copy actions. Every finalized result also exposes one-click Copy Description for its exact two-line explanation.
 
 The live adapter and controlled-service validation boundaries are published in docs/live_capability_matrix.json and docs/security_engine_validation_matrix.json. Controlled fixtures demonstrate reproducibility; they are not evidence of vulnerabilities on external systems.
 
@@ -119,6 +122,8 @@ The category folders are created for every testcase. Condition folders and PNGs 
 
 Each completed assessment contains one row for each target × 40 testcases in testcase_results.csv, plus findings.csv, tool_status.csv, llm_triage.csv, assessment_summary.txt, assessment.json, logs, raw command evidence, hashes, manifests, POC folders, and a verified ZIP archive. The GUI exposes only files that exist for the selected assessment.
 
+The results screen is organized by target. A target's table remains in testcase order from 01 through 40; unresolved coverage is shown separately from the certified FOUND, NOT_FOUND, and NA verdicts. View POC opens the target-owned PNG, Download POC downloads its original bytes, and Copy POC writes the PNG as `image/png` when the browser grants clipboard permission. Copy Description writes only the two displayed explanation lines, including for NA results.
+
 ## Troubleshooting
 
 - Python or venv missing: install Python 3.11+ and its venv package, then rerun ./install.sh.
@@ -144,7 +149,7 @@ ScopeGuard is for authorized assessment only. Never add public or third-party ta
 
 ## Validation status
 
-The current beta validation includes 35 regression tests passed, 2 explicitly skipped when browser E2E is not enabled, and 2 connected-browser E2E tests passed on the controlled local fixture. The controlled engine matrix records 16 live adapters with direct service validation, 18 with execution-path validation, and six capability-dependent conditions. This is not exhaustive real-world vulnerability validation. Read the matrices before using the tool in a pilot.
+The current beta validation includes the repository regression suite, controlled live loopback discovery, target-isolation/export checks, and connected-browser tests on local fixtures. The controlled engine matrix records 16 live adapters with direct service validation, 18 with execution-path validation, and six capability-dependent conditions. This is not exhaustive real-world vulnerability validation. Read the matrices before using the tool in a pilot.
 
 ## Contributing
 

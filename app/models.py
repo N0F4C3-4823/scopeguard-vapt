@@ -193,6 +193,7 @@ class TriageModel(BaseModel):
     observation_ids: list[str]
     interpretation: str
     suggested_action_id: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
     explanation: str
     limitations: list[str] = Field(default_factory=list)
     requires_additional_evidence: bool = False

@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from .commands import CommandResult
 from .registry import TESTCASES
 
-COMMON_TCP_PORTS = "21,22,23,53,80,135,139,443,445,1433,3389,5900,6379,8080"
+COMMON_TCP_PORTS = "21,22,23,53,80,135,139,389,443,445,1433,1521,1883,27017,3306,3389,5432,5900,6379,8080,8883,9200"
 
 
 @dataclass(frozen=True)
@@ -371,8 +371,12 @@ def _text(result: CommandResult) -> str:
     return (result.stdout + result.stderr).decode("utf-8", errors="replace")
 
 
-def _states(text: str) -> list[tuple[int, str, str]]:
-    return [(int(port), state.lower(), (service or "").strip()) for port, _proto, state, service in _PORT_LINE.findall(text)]
+def _states(text: str) -> list[tuple[int, str, str, str]]:
+    """Return port, protocol, state and service as separate facts."""
+    return [
+        (int(port), protocol.lower(), state.lower(), (service or "").strip())
+        for port, protocol, state, service in _PORT_LINE.findall(text)
+    ]
 
 
 def _nmap_complete(text: str) -> bool:
@@ -395,18 +399,49 @@ def _inconclusive(reason: str, *, observation: str | None = None) -> LiveParse:
     return LiveParse("INCONCLUSIVE", "applicable", reason, (observation,) if observation else ())
 
 
+def _expected_protocol(testcase_id: str) -> str:
+    if testcase_id in {"01", "07", "09", "13", "17", "30"}:
+        return "udp"
+    if testcase_id == "40":
+        return "mixed"
+    return "tcp"
+
+
 def _service_absent(
-    states: list[tuple[int, str, str]],
+    states: list[tuple[int, str, str, str]],
     testcase_id: str,
     *,
     complete: bool,
     all_ports_closed: bool = False,
 ) -> LiveParse | None:
-    if complete and (states and all(state == "closed" for _port, state, _service in states) or all_ports_closed):
+    expected = _expected_protocol(testcase_id)
+    relevant = [item for item in states if expected == "mixed" or item[1] == expected]
+    if complete and (relevant and all(state == "closed" for _port, _protocol, state, _service in relevant) or all_ports_closed):
         return LiveParse("NA", "No applicable service was observed on the complete tested port set", f"testcase {testcase_id} service ports were explicitly closed", (f"live-{testcase_id}-closed",), "informational", "APPLICABILITY_CONFIRMED")
-    if any(state in {"filtered", "open|filtered"} for _port, state, _service in states) and not any(state == "open" for _port, state, _service in states):
-        return _inconclusive("Filtering or UDP silence prevented service applicability from being established", observation=f"live-{testcase_id}-filtered")
+    if any(state in {"filtered", "open|filtered"} for _port, _protocol, state, _service in relevant) and not any(state == "open" for _port, _protocol, state, _service in relevant):
+        if expected == "udp":
+            reason = "UDP filtering or silence prevented service applicability from being established"
+        elif expected == "tcp":
+            reason = "TCP filtering prevented service applicability from being established"
+        else:
+            reason = "Protocol filtering prevented service applicability from being established"
+        return _inconclusive(reason, observation=f"live-{testcase_id}-filtered")
     return None
+
+
+def _execution_failure(result: CommandResult) -> str:
+    executable = result.argv[0].rsplit("/", 1)[-1] if result.argv else "command"
+    detail = (result.stderr or result.stdout).decode("utf-8", errors="replace").strip()
+    detail = f": {detail[:240]}" if detail else ""
+    if result.timed_out:
+        return f"{executable} command timed out before the protocol check completed{detail}"
+    if executable == "curl" and result.exit_code == 28:
+        return f"curl exited 28 (operation timeout); no negative security conclusion is supported{detail}"
+    if executable == "dig" and result.exit_code == 9:
+        return f"dig exited 9 (no usable DNS response); DNS safety was not established{detail}"
+    if executable in {"python", "python3"} and result.exit_code == 2:
+        return f"the protocol probe exited 2; inspect its stderr rather than treating it as a negative result{detail}"
+    return f"{executable} exited with status {result.exit_code}; the security condition was not completed{detail}"
 
 
 def _connection_refused(text: str) -> bool:
@@ -417,7 +452,7 @@ def _connection_refused(text: str) -> bool:
 def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
     """Parse a completed live command without trusting generated status tokens."""
     if result.timed_out:
-        return _inconclusive("bounded live adapter command timed out")
+        return _inconclusive(_execution_failure(result))
     text = _text(result)
     lower = text.lower()
     if testcase_id == "18":
@@ -442,7 +477,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
         service, observation = labels[testcase_id]
         return LiveParse("NA", f"No applicable {service} service was observed", f"{service} connection was explicitly refused", (observation,), "informational", "APPLICABILITY_CONFIRMED")
     if result.exit_code != 0 or result.status != "COMPLETED":
-        return _inconclusive(f"live adapter command failed with exit status {result.exit_code}")
+        return _inconclusive(_execution_failure(result))
     states = _states(text)
     complete = _nmap_complete(text)
     if states and not complete and testcase_id not in {"18", "27", "33", "40"}:
@@ -473,9 +508,9 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return _inconclusive("a discovery response was captured, but it does not establish the requested IPv6/ICMP security predicate", observation=f"live-{testcase_id}-response")
         return _inconclusive("lack of an ICMP/IPv6 response cannot prove protection or absence")
     if testcase_id == "12":
-        if any(state == "filtered" for _port, state, _service in states):
+        if any(state == "filtered" for _port, _protocol, state, _service in states):
             return LiveParse("FOUND", "applicable", None, ("live-12-filtered-port",), "informational", "VALIDATED")
-        if complete and states and all(state in {"open", "closed"} for _port, state, _service in states):
+        if complete and states and all(state in {"open", "closed"} for _port, _protocol, state, _service in states):
             return LiveParse("NOT_FOUND", "applicable", None, ("live-12-no-filtered-port",), "informational", "VALIDATED")
         return _inconclusive("TCP state scan did not complete with a definitive filtered/non-filtered result")
     if testcase_id == "19":
@@ -495,7 +530,7 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
         absent = _service_absent(states, testcase_id, complete=complete, all_ports_closed=_all_ports_closed(text))
         if absent:
             return absent
-        identified = [service for _port, state, service in states if state == "open" and service and service.lower() not in {"unknown", "tcpwrapped"}]
+        identified = [service for _port, _protocol, state, service in states if state == "open" and service and service.lower() not in {"unknown", "tcpwrapped"}]
         if testcase_id == "05" and any(re.search(r"telnet|tftp|rlogin|rsh|ftp", service, re.I) for service in identified):
             return LiveParse("FOUND", "applicable", None, ("live-05-legacy-service",), "medium", "VALIDATED")
         if testcase_id == "05" and complete and identified:

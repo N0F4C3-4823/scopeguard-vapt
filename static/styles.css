@@ -111,6 +111,9 @@ td { border-top: 1px solid #edf0f4; padding: 12px 10px; vertical-align: middle; 
 tr:hover td { background: #fbfcfe; }
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
+.description-lines { display: grid; gap: 4px; line-height: 1.45; margin-bottom: 8px; }
+.description-lines span { display: block; }
+.poc-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .tiny { font-size: 10px; }
 .empty { padding: 34px 24px; color: var(--muted); font-size: 13px; text-align: center; border: 1px dashed var(--line-strong); border-radius: 9px; background: var(--surface-soft); }
 .empty strong { display: block; color: var(--ink); margin-bottom: 5px; }
