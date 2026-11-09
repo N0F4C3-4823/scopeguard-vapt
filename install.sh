@@ -35,7 +35,7 @@ detect_platform() {
     . /etc/os-release
     DISTRO_ID="${ID:-unknown}"
     DISTRO_VERSION="${VERSION_ID:-unknown}"
-    DISTRO_NAME="${PRETTY_NAME:-\$DISTRO_ID}"
+    DISTRO_NAME="${PRETTY_NAME:-$DISTRO_ID}"
   fi
   ARCH="$(uname -m)"
   PACKAGE_MANAGER=""
