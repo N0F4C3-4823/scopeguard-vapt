@@ -207,8 +207,12 @@ def _nmap(
     udp: bool = False,
     extra: tuple[str, ...] = (),
     host_timeout_seconds: int = 8,
+    max_retries: int = 1,
 ) -> list[str]:
-    argv = ["nmap", "-Pn", "--host-timeout", f"{host_timeout_seconds}s", "--max-retries", "1", "--reason"]
+    argv = [
+        "nmap", "-Pn", "--host-timeout", f"{host_timeout_seconds}s",
+        "--max-retries", str(max(0, int(max_retries))), "--reason",
+    ]
     if udp:
         argv.append("-sU")
     if service_detection:
@@ -232,7 +236,14 @@ def _selected_ports(port_overrides: dict[str, int], keys: tuple[str, ...]) -> st
     return ",".join(selected) if selected else None
 
 
-def build_command(testcase_id: str, target: str, *, port_overrides: dict[str, int] | None = None, nmap_host_timeout_seconds: int = 8) -> list[str] | None:
+def build_command(
+    testcase_id: str,
+    target: str,
+    *,
+    port_overrides: dict[str, int] | None = None,
+    nmap_host_timeout_seconds: int = 8,
+    nmap_max_retries: int = 1,
+) -> list[str] | None:
     """Build one explicit argv for a testcase; never interpolate a shell command."""
     adapter = adapter_for(testcase_id)
     if not adapter.has_live_execution:
@@ -241,7 +252,7 @@ def build_command(testcase_id: str, target: str, *, port_overrides: dict[str, in
     host_timeout = max(1, int(nmap_host_timeout_seconds))
 
     def nmap(*args, **kwargs):
-        return _nmap(*args, host_timeout_seconds=host_timeout, **kwargs)
+        return _nmap(*args, host_timeout_seconds=host_timeout, max_retries=nmap_max_retries, **kwargs)
 
     if testcase_id in {"02", "04", "05", "11", "22"}:
         keys = tuple(COMMON_TCP_PORTS.split(","))
@@ -307,7 +318,7 @@ def build_command(testcase_id: str, target: str, *, port_overrides: dict[str, in
         port = ports.get("80", 80)
         return ["curl", "--silent", "--show-error", "--include", "--connect-timeout", "2", "--max-time", "5", "--url", f"http://{target}:{port}/"]
     if testcase_id == "29":
-        return ["nmap", "-6", "-sn", "--host-timeout", "5s", "--max-retries", "1", "--reason", target]
+        return ["nmap", "-6", "-sn", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "30":
         return nmap(target, ",".join(str(ports.get(f"{item}/udp", item)) for item in (500, 4500)), scripts=("ike-version",), udp=True)
     if testcase_id == "33":
@@ -316,7 +327,7 @@ def build_command(testcase_id: str, target: str, *, port_overrides: dict[str, in
     if testcase_id in {"34", "39"}:
         return nmap(target, str(ports.get("22", 22)), scripts=("ssh2-enum-algos",), service_detection=True)
     if testcase_id == "35":
-        return ["nmap", "-sn", "-PE", "-PS22,80,443", "--host-timeout", "5s", "--max-retries", "1", "--reason", target]
+        return ["nmap", "-sn", "-PE", "-PS22,80,443", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "36":
         keys = ("135", "593")
         selected = _selected_ports(ports, keys)
@@ -324,7 +335,7 @@ def build_command(testcase_id: str, target: str, *, port_overrides: dict[str, in
     if testcase_id == "37":
         return nmap(target, str(ports.get("5900", 5900)), scripts=("vnc-info",), service_detection=True)
     if testcase_id == "38":
-        return ["nmap", "-sn", "-PE", "-PP", "-PM", "--host-timeout", "5s", "--max-retries", "1", "--reason", target]
+        return ["nmap", "-sn", "-PE", "-PP", "-PM", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "40":
         return ["dig", "+time=2", "+tries=1", "+noall", "+answer", f"@{target}", ".", "NS"]
     raise ValueError(f"No command builder for testcase {testcase_id}")
@@ -363,6 +374,11 @@ def _service_absent(states: list[tuple[int, str, str]], testcase_id: str) -> Liv
     return None
 
 
+def _connection_refused(text: str) -> bool:
+    """Recognize an explicit TCP refusal, but never treat timeout/silence as absence."""
+    return bool(re.search(r"connection refused|conn-refused", text, re.IGNORECASE))
+
+
 def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
     """Parse a completed live command without trusting generated status tokens."""
     if result.timed_out:
@@ -374,11 +390,22 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("FOUND", "applicable", None, ("live-18-anonymous-ftp",), "high", "VALIDATED")
         if re.search(r"(?:^|\s)530\s|not logged in|authentication required", lower):
             return LiveParse("NOT_FOUND", "applicable", None, ("live-18-anonymous-denied",), "informational", "VALIDATED")
+        if result.exit_code == 7 and _connection_refused(lower):
+            return LiveParse("NA", "No applicable FTP service was observed", "FTP control connection was explicitly refused", ("live-18-ftp-refused",), "informational", "APPLICABILITY_CONFIRMED")
         if result.status == "COMPLETED" and result.exit_code == 0 and result.stdout.strip():
             return LiveParse("FOUND", "applicable", None, ("live-18-anonymous-ftp-listing",), "high", "VALIDATED")
         if result.exit_code != 0 or result.status != "COMPLETED":
             return _inconclusive(f"FTP anonymous probe failed with exit status {result.exit_code}")
         return _inconclusive("FTP response did not establish anonymous access or denial")
+    if testcase_id in {"24", "27", "33", "40"} and result.exit_code != 0 and _connection_refused(lower):
+        labels = {
+            "24": ("Redis", "live-24-redis-refused"),
+            "27": ("HTTP", "live-27-http-refused"),
+            "33": ("HTTP", "live-33-http-refused"),
+            "40": ("DNS", "live-40-dns-refused"),
+        }
+        service, observation = labels[testcase_id]
+        return LiveParse("NA", f"No applicable {service} service was observed", f"{service} connection was explicitly refused", (observation,), "informational", "APPLICABILITY_CONFIRMED")
     if result.exit_code != 0 or result.status != "COMPLETED":
         return _inconclusive(f"live adapter command failed with exit status {result.exit_code}")
     states = _states(text)
@@ -418,6 +445,13 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
         if states:
             return _inconclusive("port inventory is an exposure observation only; reachability alone is not a security classification", observation="live-19-port-inventory")
         return _inconclusive("no complete port inventory was captured")
+    if testcase_id == "20":
+        absent = _service_absent(states, testcase_id)
+        if absent:
+            return absent
+        if complete and states:
+            return _inconclusive("Messaging/WebSocket service state was observed, but no safe unauthenticated data or action predicate was established", observation="live-20-service-inventory")
+        return _inconclusive("Messaging/WebSocket service inventory was incomplete")
     if testcase_id in {"02", "04", "05", "11", "22"}:
         if not states:
             return _inconclusive("service fingerprint scan returned no parseable port state")

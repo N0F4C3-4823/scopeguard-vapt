@@ -199,6 +199,12 @@ class Database:
                 targets,
             )
 
+    def delete_assessment(self, assessment_id: str) -> bool:
+        """Delete one assessment and its cascaded database records."""
+        with self._lock, self.connect() as connection:
+            cursor = connection.execute("DELETE FROM assessments WHERE id=?", (assessment_id,))
+            return cursor.rowcount > 0
+
     def get_assessment(self, assessment_id: str) -> dict[str, Any] | None:
         with self._lock, self.connect() as connection:
             row = connection.execute("SELECT * FROM assessments WHERE id=?", (assessment_id,)).fetchone()

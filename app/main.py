@@ -180,6 +180,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Assessment not found")
         return _serialize_assessment(row)
 
+    @app.delete("/api/assessments/{assessment_id}")
+    async def delete_assessment(assessment_id: str) -> dict[str, Any]:
+        try:
+            manager.delete(assessment_id)
+        except ValueError as error:
+            detail = str(error)
+            status_code = 409 if "before deleting" in detail else 404
+            raise HTTPException(status_code=status_code, detail=detail) from error
+        return {"status": "deleted", "assessment_id": assessment_id}
+
     @app.post("/api/assessments/{assessment_id}/start")
     async def start_assessment(assessment_id: str) -> dict[str, Any]:
         try:

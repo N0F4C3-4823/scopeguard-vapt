@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import threading
 import time
@@ -15,6 +16,7 @@ from .evidence import safe_name, write_applicability_evidence, write_testcase_ev
 from .exporter import export_assessment
 from .live_adapters import adapter_for, build_command
 from .models import AssessmentCreate
+from .ollama import OllamaClient
 from .registry import TESTCASES
 from .scope import NormalizedTarget, parse_scope
 
@@ -24,6 +26,7 @@ class AssessmentManager:
         self.db = db
         self.settings = settings
         self.settings.ensure_dirs()
+        self.ollama = OllamaClient(settings.ollama_url, settings.ollama_model)
         self._lock = threading.RLock()
         self._threads: dict[str, threading.Thread] = {}
         self._cancel: dict[str, threading.Event] = {}
@@ -137,6 +140,41 @@ class AssessmentManager:
             self._threads[assessment_id] = thread
             thread.start()
 
+    def delete(self, assessment_id: str) -> None:
+        assessment = self.db.get_assessment(assessment_id)
+        if not assessment:
+            raise ValueError("Assessment not found")
+        if assessment.get("status") in {"QUEUED", "RUNNING", "PAUSED"}:
+            raise ValueError("Stop or cancel the assessment before deleting it")
+        with self._lock:
+            thread = self._threads.get(assessment_id)
+            if thread and thread.is_alive():
+                raise ValueError("Stop or cancel the assessment before deleting it")
+
+        assessment_path = self.settings.data_dir / "assessments" / assessment_id
+        assessments_root = (self.settings.data_dir / "assessments").resolve()
+        exports_root = (self.settings.data_dir / "exports").resolve()
+        if assessment_path.is_symlink():
+            raise ValueError("Refusing to delete a symlinked assessment directory")
+        assessment_root = assessment_path.resolve()
+        if not assessment_root.is_relative_to(assessments_root):
+            raise ValueError("Assessment path is outside the local data directory")
+        if assessment_root.exists():
+            shutil.rmtree(assessment_path)
+        for export_path in (
+            self.settings.data_dir / "exports" / f"{assessment_id}.csv",
+            self.settings.data_dir / "exports" / f"{assessment_id}.zip",
+        ):
+            if export_path.is_symlink():
+                raise ValueError("Refusing to delete a symlinked assessment export")
+            resolved = export_path.resolve()
+            if not resolved.is_relative_to(exports_root):
+                raise ValueError("Export path is outside the local data directory")
+            if export_path.is_file():
+                export_path.unlink()
+        if not self.db.delete_assessment(assessment_id):
+            raise ValueError("Assessment was already deleted")
+
     def pause(self, assessment_id: str) -> None:
         event = self._pause.get(assessment_id)
         if not event:
@@ -178,6 +216,7 @@ class AssessmentManager:
         error_count = 0
         applicable_count = 0
         completed = 0
+        pending_triage: list[tuple[int, str, list[str], str]] = []
         try:
             self.db.update_assessment(assessment_id, status="RUNNING", started_at=now_iso(), current_phase="Preflight")
             self.db.add_event(assessment_id, "phase_started", "Preflight", "Preflight checks completed.")
@@ -280,6 +319,20 @@ class AssessmentManager:
                         "created_at": now_iso(),
                     }
                     result_id = self.db.add_result(result_row)
+                    if assessment["llm_enabled"] and classification.status == "INCONCLUSIVE":
+                        pending_triage.append(
+                            (
+                                result_id,
+                                testcase.id,
+                                list(getattr(classification, "observation_ids", ())),
+                                "\n".join(
+                                    part for part in (
+                                        classification.failure_reason or "",
+                                        command_result.combined_output.decode("utf-8", errors="replace") if command_result else "",
+                                    ) if part
+                                )[:6000],
+                            )
+                        )
                     if command_result is not None:
                         self.db.add_execution({
                             "id": command_result.id,
@@ -340,7 +393,44 @@ class AssessmentManager:
             self.db.update_assessment(assessment_id, current_phase="Evidence Verification")
             self.db.add_event(assessment_id, "phase_completed", "Evidence Verification", "Evidence hashes and provenance were persisted.")
             self.db.update_assessment(assessment_id, current_phase="AI Triage")
-            self.db.add_event(assessment_id, "phase_skipped", "AI Triage", "Optional local AI remains secondary and is disabled unless explicitly enabled.")
+            if assessment["llm_enabled"] and pending_triage:
+                self.db.add_event(assessment_id, "phase_started", "AI Triage", f"Analyzing {len(pending_triage)} inconclusive result(s) with the optional local model.")
+                for result_id, testcase_id, observation_ids, evidence in pending_triage:
+                    try:
+                        triage = self.ollama.triage(
+                            testcase_id=testcase_id,
+                            observation_ids=observation_ids,
+                            evidence=evidence,
+                        )
+                        self.db.add_llm_triage({
+                            "assessment_id": assessment_id,
+                            "result_id": result_id,
+                            "model": self.ollama.model,
+                            "prompt_version": "scopeguard-triage-v1",
+                            "response_json": json.dumps(triage.model_dump(), ensure_ascii=False),
+                            "validation_state": "VALIDATED",
+                            "created_at": now_iso(),
+                        })
+                        self.db.add_event(
+                            assessment_id,
+                            "llm_triage_completed",
+                            "AI Triage",
+                            f"Validated secondary explanation stored for testcase {testcase_id}; deterministic classification unchanged.",
+                            testcase_id=testcase_id,
+                        )
+                    except Exception as error:
+                        self.db.add_event(
+                            assessment_id,
+                            "llm_triage_failed",
+                            "AI Triage",
+                            f"Local AI analysis unavailable for testcase {testcase_id}; deterministic result preserved.",
+                            testcase_id=testcase_id,
+                            payload={"error_type": type(error).__name__, "error": str(error)[:240]},
+                        )
+                self.db.add_event(assessment_id, "phase_completed", "AI Triage", "Optional local AI analysis completed without changing deterministic classifications.")
+            else:
+                reason = "disabled by assessment configuration" if not assessment["llm_enabled"] else "no inconclusive evidence required secondary analysis"
+                self.db.add_event(assessment_id, "phase_skipped", "AI Triage", f"Optional local AI skipped: {reason}.")
             self.db.update_assessment(assessment_id, current_phase="Report Generation")
             self.db.add_event(assessment_id, "phase_completed", "Report Generation", "Report inputs are complete.")
             self.db.update_assessment(assessment_id, current_phase="Packaging")
@@ -360,7 +450,12 @@ class AssessmentManager:
             timeout = 0.35 if scenario == "timeout" else 4.0
         else:
             adapter = adapter_for(testcase_id)
-            argv = build_command(testcase_id, target_obj.value, nmap_host_timeout_seconds=self.settings.scanner_host_timeout_seconds)
+            argv = build_command(
+                testcase_id,
+                target_obj.value,
+                nmap_host_timeout_seconds=self.settings.scanner_host_timeout_seconds,
+                nmap_max_retries=self.settings.scanner_max_retries,
+            )
             if argv is None:
                 # Capability-only checks remain explicitly incomplete when the
                 # selected profile makes them applicable but no authorized
@@ -375,6 +470,8 @@ class AssessmentManager:
                     target_obj.value,
                 ]
             timeout = self.settings.live_command_timeout if adapter.live_status == "LIVE" else self.settings.live_limited_command_timeout
+            if argv and argv[0].rsplit("/", 1)[-1] == "nmap":
+                timeout = max(timeout, self.settings.scanner_host_timeout_seconds + self.settings.scanner_command_grace_seconds)
         with self._command_metrics_lock:
             self.active_commands += 1
             self.max_active_commands = max(self.max_active_commands, self.active_commands)

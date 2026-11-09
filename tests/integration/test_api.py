@@ -1,4 +1,6 @@
 
+import time
+
 from fastapi.testclient import TestClient
 
 
@@ -57,6 +59,59 @@ def test_api_rejects_mixed_fixture_and_live_scope(application):
     )
     assert response.status_code == 400
     assert "mix" in response.json()["detail"].lower()
+
+
+def test_api_deletes_assessment_and_local_artifacts(application):
+    client = TestClient(application)
+    response = client.post(
+        "/api/assessments",
+        json={
+            "name": "Assessment to delete",
+            "targets": ["fixture://negative"],
+            "authorized": True,
+            "profile": "controlled_fixture",
+        },
+    )
+    assert response.status_code == 200
+    assessment_id = response.json()["id"]
+    data_dir = application.state.settings.data_dir
+    assessment_root = data_dir / "assessments" / assessment_id
+    assessment_root.mkdir(parents=True, exist_ok=True)
+    (assessment_root / "marker.txt").write_text("local evidence", encoding="utf-8")
+    exports = data_dir / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    (exports / f"{assessment_id}.zip").write_bytes(b"zip placeholder")
+
+    deleted = client.delete(f"/api/assessments/{assessment_id}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"status": "deleted", "assessment_id": assessment_id}
+    assert client.get(f"/api/assessments/{assessment_id}").status_code == 404
+    assert not assessment_root.exists()
+    assert not (exports / f"{assessment_id}.zip").exists()
+
+
+def test_api_does_not_delete_active_assessment(application):
+    client = TestClient(application)
+    response = client.post(
+        "/api/assessments",
+        json={
+            "name": "Active assessment cannot delete",
+            "targets": ["fixture://timeout"],
+            "authorized": True,
+            "profile": "controlled_fixture",
+        },
+    )
+    assessment_id = response.json()["id"]
+    started = client.post(f"/api/assessments/{assessment_id}/start")
+    assert started.status_code == 200
+    for _ in range(50):
+        if client.get(f"/api/assessments/{assessment_id}").json()["status"] == "RUNNING":
+            break
+        time.sleep(0.01)
+    deletion = client.delete(f"/api/assessments/{assessment_id}")
+    assert deletion.status_code == 409
+    assert "before deleting" in deletion.json()["detail"]
+    client.post(f"/api/assessments/{assessment_id}/cancel")
 
 
 def test_api_exposes_complete_machine_readable_live_capability_matrix(application):

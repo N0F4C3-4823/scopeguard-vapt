@@ -14,9 +14,14 @@ class Settings:
     port: int = 8000
     max_cidr_hosts: int = 256
     max_workers: int = 1
-    live_command_timeout: float = 12.0
-    live_limited_command_timeout: float = 10.0
-    scanner_host_timeout_seconds: int = 8
+    # Live timeouts are deliberately independent from controlled-fixture
+    # timing. Nmap service detection can spend longer than its host timeout
+    # finishing NSE/version work, so the subprocess grace period is explicit.
+    live_command_timeout: float = 45.0
+    live_limited_command_timeout: float = 45.0
+    scanner_host_timeout_seconds: int = 30
+    scanner_command_grace_seconds: int = 15
+    scanner_max_retries: int = 2
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:1.5b-instruct"
     ollama_binary: Path | None = None
@@ -57,9 +62,11 @@ def load_settings(root_dir: Path | None = None) -> Settings:
         port=int(os.getenv("SCOPEGUARD_PORT", "8000")),
         max_cidr_hosts=int(os.getenv("SCOPEGUARD_MAX_CIDR_HOSTS", "256")),
         max_workers=max(1, int(os.getenv("SCOPEGUARD_MAX_WORKERS", "1"))),
-        live_command_timeout=max(1.0, float(os.getenv("SCOPEGUARD_LIVE_COMMAND_TIMEOUT", "12"))),
-        live_limited_command_timeout=max(1.0, float(os.getenv("SCOPEGUARD_LIVE_LIMITED_COMMAND_TIMEOUT", "10"))),
-        scanner_host_timeout_seconds=max(1, int(os.getenv("SCOPEGUARD_SCANNER_HOST_TIMEOUT", "8"))),
+        live_command_timeout=max(1.0, float(os.getenv("SCOPEGUARD_LIVE_COMMAND_TIMEOUT", "45"))),
+        live_limited_command_timeout=max(1.0, float(os.getenv("SCOPEGUARD_LIVE_LIMITED_COMMAND_TIMEOUT", "45"))),
+        scanner_host_timeout_seconds=max(1, int(os.getenv("SCOPEGUARD_SCANNER_HOST_TIMEOUT", "30"))),
+        scanner_command_grace_seconds=max(1, int(os.getenv("SCOPEGUARD_SCANNER_COMMAND_GRACE", "15"))),
+        scanner_max_retries=max(0, int(os.getenv("SCOPEGUARD_SCANNER_MAX_RETRIES", "2"))),
         ollama_url=os.getenv("SCOPEGUARD_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/"),
         ollama_model=os.getenv("SCOPEGUARD_OLLAMA_MODEL", "qwen2.5:1.5b-instruct"),
         ollama_binary=ollama_binary,
