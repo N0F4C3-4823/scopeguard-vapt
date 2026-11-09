@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 [ -x "$ROOT_DIR/.venv/bin/python" ] || { echo "Virtual environment missing. Run ./install.sh first." >&2; exit 1; }
 source "$ROOT_DIR/.venv/bin/activate"
 
-HOST="\${SCOPEGUARD_HOST:-127.0.0.1}"
-PORT="\${SCOPEGUARD_PORT:-8000}"
+HOST="${SCOPEGUARD_HOST:-127.0.0.1}"
+PORT="${SCOPEGUARD_PORT:-8000}"
 NEXT_IS_HOST=0
 NEXT_IS_PORT=0
 for arg in "$@"; do
   case "$arg" in
     --host) NEXT_IS_HOST=1 ;;
     --port) NEXT_IS_PORT=1 ;;
-    --host=*) HOST="\${arg#*=}" ;;
-    --port=*) PORT="\${arg#*=}" ;;
+    --host=*) HOST="${arg#*=}" ;;
+    --port=*) PORT="${arg#*=}" ;;
     *)
       if [ "$NEXT_IS_HOST" = 1 ]; then HOST="$arg"; NEXT_IS_HOST=0; fi
       if [ "$NEXT_IS_PORT" = 1 ]; then PORT="$arg"; NEXT_IS_PORT=0; fi
@@ -23,13 +23,13 @@ for arg in "$@"; do
 done
 
 BASE_URL="http://$HOST:$PORT"
-OLLAMA_BIN="\${SCOPEGUARD_OLLAMA_BIN:-}"
+OLLAMA_BIN="${SCOPEGUARD_OLLAMA_BIN:-}"
 if [ -z "$OLLAMA_BIN" ] || [ "$OLLAMA_BIN" = "./.tools/ollama/bin/ollama" ]; then
   if [ -x "$ROOT_DIR/.tools/ollama/bin/ollama" ]; then OLLAMA_BIN="$ROOT_DIR/.tools/ollama/bin/ollama"
   else OLLAMA_BIN="$(command -v ollama 2>/dev/null || true)"
   fi
 fi
-OLLAMA_URL="\${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}"
+OLLAMA_URL="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}"
 SERVER_PID=""
 OLLAMA_PID=""
 mkdir -p "$ROOT_DIR/data/logs"
@@ -68,8 +68,8 @@ if health_check 2>/dev/null; then
 fi
 
 if [ -n "$OLLAMA_BIN" ] && [ -x "$OLLAMA_BIN" ] && ! ollama_health; then
-  mkdir -p "\${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}"
-  OLLAMA_HOST="$OLLAMA_URL" OLLAMA_MODELS="\${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" \\
+  mkdir -p "${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}"
+  OLLAMA_HOST="$OLLAMA_URL" OLLAMA_MODELS="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" \
     OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 "$OLLAMA_BIN" serve >"$ROOT_DIR/data/logs/ollama.log" 2>&1 &
   OLLAMA_PID=$!
   for _ in $(seq 1 60); do ollama_health && break; sleep 0.5; done
