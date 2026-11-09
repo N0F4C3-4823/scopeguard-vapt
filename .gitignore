@@ -12,6 +12,7 @@ node_modules/
 .tools/
 playwright-report/
 test-results/
+.playwright-mcp/
 .mypy_cache/
 .hypothesis/
 .tox/
