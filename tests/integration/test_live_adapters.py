@@ -60,7 +60,7 @@ def test_live_http_positive_and_negative_conditions_use_real_subprocess(live_htt
     assert classify_live(next(test for test in TESTCASES if test.id == "27"), version_positive).status == "FOUND"
     assert classify_live(next(test for test in TESTCASES if test.id == "33"), headers_positive).status == "FOUND"
     assert b"nginx/1.25.0" in version_positive.stdout
-    assert b"HTTP/" in headers_positive.stdout
+    assert b"http-headers" in headers_positive.stdout
 
     live_http_service.RequestHandlerClass.mode = "negative"
     version_negative = _run("27", live_http_service.server_address[1])

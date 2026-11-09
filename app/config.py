@@ -13,7 +13,8 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     max_cidr_hosts: int = 256
-    max_workers: int = 1
+    # Target-level concurrency is bounded by the orchestrator at ten.
+    max_workers: int = 10
     # Live timeouts are deliberately independent from controlled-fixture
     # timing. Nmap service detection can spend longer than its host timeout
     # finishing NSE/version work, so the subprocess grace period is explicit.
@@ -65,7 +66,7 @@ def load_settings(root_dir: Path | None = None) -> Settings:
         host=os.getenv("SCOPEGUARD_HOST", "127.0.0.1"),
         port=int(os.getenv("SCOPEGUARD_PORT", "8000")),
         max_cidr_hosts=int(os.getenv("SCOPEGUARD_MAX_CIDR_HOSTS", "256")),
-        max_workers=max(1, int(os.getenv("SCOPEGUARD_MAX_WORKERS", "1"))),
+        max_workers=min(10, max(1, int(os.getenv("SCOPEGUARD_MAX_WORKERS", "10")))),
         live_command_timeout=max(1.0, float(os.getenv("SCOPEGUARD_LIVE_COMMAND_TIMEOUT", "45"))),
         live_limited_command_timeout=max(1.0, float(os.getenv("SCOPEGUARD_LIVE_LIMITED_COMMAND_TIMEOUT", "45"))),
         scanner_host_timeout_seconds=max(1, int(os.getenv("SCOPEGUARD_SCANNER_HOST_TIMEOUT", "30"))),

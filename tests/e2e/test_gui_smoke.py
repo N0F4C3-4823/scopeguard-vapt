@@ -36,6 +36,12 @@ async def test_scopeguard_gui_fixture_lifecycle_and_exports():
         await page.locator('button[data-wizard-next="4"]').click()
         await page.locator("#authorization-note").fill("automated controlled fixture authorization")
         await page.locator("#authorized").check()
+        # The lifecycle/export smoke test exercises the GUI and report path.
+        # Local AI is validated by the live Ollama health/recovery gates;
+        # disabling the optional secondary analysis here keeps the browser
+        # gate bounded when the fixture intentionally emits many inconclusive
+        # conditions.
+        await page.locator("#llm-enabled").uncheck()
         await page.get_by_role("button", name="Create assessment").click()
         await page.locator('button[data-control="start"]').wait_for()
         await page.locator('button[data-control="start"]').click()

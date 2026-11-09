@@ -79,6 +79,14 @@ class AssessmentEdit(BaseModel):
         return value
 
 
+class VersionReviewRequest(BaseModel):
+    decision: Literal["outdated", "none_outdated"]
+    selected_entry_ids: list[str] = Field(default_factory=list, max_length=256)
+    reviewed_entry_ids: list[str] = Field(default_factory=list, max_length=256)
+    unidentified_acknowledged: bool = False
+    operator_note: str = Field(default="", max_length=1000)
+
+
 class AssessmentControl(BaseModel):
     action: Literal["start", "pause", "resume", "cancel"]
 

@@ -310,10 +310,10 @@
       "live_adapter": "nmap_service_fingerprint",
       "command_path_exercised": true,
       "controlled_service_validated": false,
-      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
-      "positive_result": "NOT_VALIDATED",
-      "negative_result": "NOT_VALIDATED",
-      "inconclusive_result": "NOT_VALIDATED",
+      "actual_test_method": "Nmap service/version discovery followed by explicit per-target operator review; no online CVE research.",
+      "positive_result": "OPERATOR_REVIEWED_FOUND",
+      "negative_result": "OPERATOR_REVIEWED_NOT_FOUND",
+      "inconclusive_result": "AWAITING_OPERATOR_REVIEW",
       "malformed_result": "NOT_VALIDATED",
       "evidence_verification": "Actual argv, stdout, stderr, exit code, tool version, SHA-256 hashes, and provenance are captured by the command runner; export/hash integrity is exercised by the production live assessment test.",
       "supported_profiles": [
@@ -331,7 +331,7 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "limitations": "Product/version evidence is captured, but no CVE is marked applicable without an advisory-aware verifier."
+      "limitations": "Ambiguous or unidentified entries remain visible and require operator acknowledgment; an operator decision is not an independent exploitability or CVE claim."
     },
     {
       "id": "12",
@@ -518,10 +518,10 @@
       "id": "18",
       "condition": "FTP_Anonymous_Exposure",
       "live_status": "LIVE",
-      "live_adapter": "curl_ftp_anonymous",
+      "live_adapter": "python_ftp_anonymous",
       "command_path_exercised": true,
       "controlled_service_validated": true,
-      "actual_test_method": "actual curl anonymous FTP listing against local FTP/21 fixture",
+      "actual_test_method": "actual bounded native FTP anonymous-login probe against local FTP/21 fixture",
       "positive_result": "FOUND_VALIDATED",
       "negative_result": "NOT_FOUND_VALIDATED",
       "inconclusive_result": "NOT_VALIDATED",
@@ -534,7 +534,7 @@
         "custom_hybrid"
       ],
       "required_tools": [
-        "curl"
+        "python"
       ],
       "required_vantage": [
         "external"
@@ -969,10 +969,10 @@
       "id": "33",
       "condition": "Web_Configuration",
       "live_status": "LIVE",
-      "live_adapter": "curl_http_security_headers",
+      "live_adapter": "nmap_http_security_checks",
       "command_path_exercised": true,
       "controlled_service_validated": true,
-      "actual_test_method": "actual curl HTTP response against missing/present X-Content-Type-Options local fixtures",
+      "actual_test_method": "actual Nmap HTTP NSE checks against missing/present X-Content-Type-Options local fixtures",
       "positive_result": "FOUND_VALIDATED",
       "negative_result": "NOT_FOUND_VALIDATED",
       "inconclusive_result": "NOT_VALIDATED",
@@ -985,7 +985,7 @@
         "custom_hybrid"
       ],
       "required_tools": [
-        "curl"
+        "nmap"
       ],
       "required_vantage": [
         "external"
@@ -993,7 +993,7 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "limitations": "A response with a missing required security header is FOUND; a complete response with the required header is NOT_FOUND for that precise condition."
+      "limitations": "Each supported HTTP condition is evaluated independently from safe Nmap script output; one present header never establishes broad HTTP security."
     },
     {
       "id": "34",
@@ -1119,10 +1119,10 @@
       "id": "38",
       "condition": "ICMP_Disclosure",
       "live_status": "LIVE_LIMITED",
-      "live_adapter": "nmap_icmp_discovery",
+      "live_adapter": "nmap_icmp_information_queries",
       "command_path_exercised": true,
       "controlled_service_validated": false,
-      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "actual_test_method": "Nmap timestamp/address-mask query path exercised against authorized loopback where applicable.",
       "positive_result": "NOT_VALIDATED",
       "negative_result": "NOT_VALIDATED",
       "inconclusive_result": "NOT_VALIDATED",
@@ -1143,7 +1143,7 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "limitations": "An actual ICMP response is recorded as an observation; absence of response is never a negative security conclusion."
+      "limitations": "Echo reachability is not disclosure; only explicit timestamp/address-mask information responses are evaluated."
     },
     {
       "id": "39",
@@ -1179,10 +1179,10 @@
       "id": "40",
       "condition": "DNS_Recursion_Transfer",
       "live_status": "LIVE_LIMITED",
-      "live_adapter": "dig_authorized_dns_query",
+      "live_adapter": "dig_dns_udp_tcp_and_nmap",
       "command_path_exercised": true,
       "controlled_service_validated": false,
-      "actual_test_method": "No controlled service harness for this condition; live command path exercised against authorized loopback where applicable.",
+      "actual_test_method": "Separate dig UDP/TCP response checks with Nmap DNS corroboration where available.",
       "positive_result": "NOT_VALIDATED",
       "negative_result": "NOT_VALIDATED",
       "inconclusive_result": "NOT_VALIDATED",
@@ -1195,7 +1195,8 @@
         "custom_hybrid"
       ],
       "required_tools": [
-        "dig"
+        "dig",
+        "nmap"
       ],
       "required_vantage": [
         "external"
@@ -1203,7 +1204,7 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "limitations": "DNS responses are captured, but recursion/zone-transfer conclusions require an explicitly authorized zone and matching evidence."
+      "limitations": "UDP/TCP response behavior and DNS flags are preserved independently; recursion or transfer conclusions require matching authorized evidence."
     }
   ]
 }

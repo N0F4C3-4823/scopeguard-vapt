@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,7 +26,12 @@ from .discovery import (
     protocol_for_testcase,
     service_gate,
 )
-from .evidence import safe_name, write_applicability_evidence, write_testcase_evidence
+from .evidence import (
+    render_poc_pngs,
+    safe_name,
+    write_applicability_evidence,
+    write_testcase_evidence,
+)
 from .exporter import export_assessment
 from .live_adapters import adapter_for, build_command
 from .models import AssessmentCreate
@@ -33,6 +39,7 @@ from .ollama import OllamaClient
 from .recovery import plan_recovery, recovery_is_useful
 from .registry import TESTCASES
 from .scope import NormalizedTarget, parse_scope
+from .version_review import parse_version_observations, review_descriptions, validate_review_entries
 
 
 class AssessmentManager:
@@ -46,6 +53,7 @@ class AssessmentManager:
         self._cancel: dict[str, threading.Event] = {}
         self._pause: dict[str, threading.Event] = {}
         self._command_metrics_lock = threading.Lock()
+        self._command_semaphore = threading.BoundedSemaphore(min(10, max(1, settings.max_workers)))
         self.active_commands = 0
         self.max_active_commands = 0
         self.executed_commands = 0
@@ -802,11 +810,140 @@ class AssessmentManager:
             "counts": counts,
         }
 
-    def _run(self, assessment_id: str, cancel: threading.Event, pause: threading.Event) -> None:
+    def _refresh_assessment_progress(self, assessment_id: str) -> dict[str, int]:
+        results = self.db.list_results(assessment_id)
+        counts = {status: sum(item.get("status") == status for item in results) for status in ("FOUND", "NOT_FOUND", "NA", "INCONCLUSIVE")}
+        progress = {
+            "completed_units": len(results),
+            "found_count": counts["FOUND"],
+            "not_found_count": counts["NOT_FOUND"],
+            "na_count": counts["NA"],
+            "inconclusive_count": counts["INCONCLUSIVE"],
+            # Applicability is an execution decision, not a prose field.  A
+            # completed applicable check may carry an evidence-specific
+            # explanation such as “evidence insufficient”, while an
+            # applicability limitation is explicitly marked by the decision
+            # path.  Count the former as applicable and exclude only genuine
+            # NA/applicability-blocked rows.
+            "applicable_count": sum(
+                item.get("status") != "NA"
+                and not (
+                    item.get("coverage_status") == "BLOCKED"
+                    and item.get("validation_state") == "APPLICABILITY_LIMITATION"
+                )
+                for item in results
+            ),
+            "error_count": sum(item.get("coverage_status") in {"FAILED", "BLOCKED", "INSUFFICIENT_EVIDENCE"} for item in results),
+        }
+        self.db.update_assessment(assessment_id, **progress)
+        return progress
+
+    def _finish_assessment(self, assessment_id: str, assessment: dict, cancel: threading.Event) -> None:
+        if cancel.is_set():
+            self.db.update_assessment(assessment_id, status="CANCELLED", completed_at=now_iso(), current_phase="Cancelled")
+            self.db.add_event(assessment_id, "assessment_cancelled", "Cancelled", "Assessment cancelled at a safe checkpoint.")
+            return
+        self.db.update_assessment(assessment_id, current_phase="Evidence Verification")
+        self.db.add_event(assessment_id, "phase_completed", "Evidence Verification", "Evidence hashes and provenance were persisted.")
+        self.db.update_assessment(assessment_id, current_phase="AI Triage")
+        recovery_count = len(self.db.list_ai_recovery(assessment_id))
+        if assessment["llm_enabled"] and recovery_count:
+            self.db.add_event(
+                assessment_id,
+                "phase_completed",
+                "AI Triage",
+                f"Automatic discrepancy analysis completed for {recovery_count} captured discrepancy record(s); deterministic classifications remain authoritative.",
+            )
+        else:
+            reason = "disabled by assessment configuration" if not assessment["llm_enabled"] else "no discrepancies required secondary analysis"
+            self.db.add_event(assessment_id, "phase_skipped", "AI Triage", f"Optional local AI skipped: {reason}.")
+        self.db.update_assessment(assessment_id, current_phase="Report Generation")
+        self.db.add_event(assessment_id, "phase_completed", "Report Generation", "Report inputs are complete.")
+        self.db.update_assessment(assessment_id, current_phase="Packaging")
+        self.db.add_event(assessment_id, "phase_started", "Packaging", "Creating CSV and ZIP exports.")
+        exports = export_assessment(self.db, assessment_id, self.settings.data_dir, status_override="COMPLETED")
+        progress = self._refresh_assessment_progress(assessment_id)
+        self.db.add_event(
+            assessment_id,
+            "assessment_completed",
+            "Complete",
+            "Assessment and exports completed with persisted evidence.",
+            completed_units=progress["completed_units"],
+            total_units=assessment["total_units"],
+            payload={"csv": str(exports["csv"]), "zip": str(exports["zip"])},
+        )
+        outcome = "COMPLETED" if progress["inconclusive_count"] == 0 else "COMPLETED_WITH_LIMITATIONS"
+        self.db.update_assessment(
+            assessment_id,
+            status="COMPLETED",
+            completed_at=now_iso(),
+            current_phase="Complete",
+            current_target=None,
+            current_testcase=None,
+            completion_outcome=outcome,
+        )
+
+    def _run_parallel(self, assessment_id: str, cancel: threading.Event, pause: threading.Event, targets: list[dict]) -> None:
         assessment = self.db.get_assessment(assessment_id)
         if not assessment:
             return
-        targets = self.db.get_targets(assessment_id)
+        worker_count = min(10, max(1, self.settings.max_workers), len(targets))
+        self.db.update_assessment(assessment_id, status="RUNNING", started_at=now_iso(), current_phase="Preflight")
+        for phase, message in (
+            ("Preflight", "Preflight checks completed."),
+            ("Dependencies", "Command runner and capability checks are available."),
+            ("Scope Validation", "Authorized scope and capability manifest was persisted before execution."),
+        ):
+            self.db.add_event(assessment_id, "phase_completed", phase, message)
+        self.db.update_assessment(assessment_id, current_phase="Discovery")
+        self.db.add_event(
+            assessment_id,
+            "target_scheduler_started",
+            "Discovery",
+            f"Scheduling {len(targets)} targets with up to {worker_count} concurrent target workers.",
+            total_units=assessment["total_units"],
+            payload={"max_target_workers": worker_count, "target_count": len(targets)},
+        )
+        try:
+            with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="scopeguard-target") as executor:
+                futures = {
+                    executor.submit(self._run, assessment_id, cancel, pause, [target], True): target
+                    for target in targets
+                }
+                for future in as_completed(futures):
+                    target = futures[future]
+                    try:
+                        future.result()
+                    except Exception as error:  # pragma: no cover - defensive worker boundary
+                        self.db.add_event(
+                            assessment_id,
+                            "target_worker_failed",
+                            "Security Checks",
+                            f"Target worker failed safely: {type(error).__name__}",
+                            status="FAILED",
+                            target_id=target["id"],
+                        )
+            self._finish_assessment(assessment_id, assessment, cancel)
+        except Exception as error:
+            self.db.update_assessment(assessment_id, status="FAILED", completed_at=now_iso(), current_phase="Failed")
+            self.db.add_event(assessment_id, "assessment_failed", "Failed", f"Assessment stopped: {error}", payload={"error_type": type(error).__name__})
+
+    def _run(
+        self,
+        assessment_id: str,
+        cancel: threading.Event,
+        pause: threading.Event,
+        target_subset: list[dict] | None = None,
+        worker_mode: bool = False,
+    ) -> None:
+        assessment = self.db.get_assessment(assessment_id)
+        if not assessment:
+            return
+        all_targets = self.db.get_targets(assessment_id)
+        targets = target_subset if target_subset is not None else all_targets
+        if not worker_mode and len(targets) > 1:
+            self._run_parallel(assessment_id, cancel, pause, targets)
+            return
         assessment_root = self.settings.data_dir / "assessments" / assessment_id
         counters = {"FOUND": 0, "NOT_FOUND": 0, "NA": 0, "INCONCLUSIVE": 0}
         error_count = 0
@@ -814,12 +951,13 @@ class AssessmentManager:
         completed = 0
         discovery: dict[str, DiscoverySnapshot] = {}
         try:
-            self.db.update_assessment(assessment_id, status="RUNNING", started_at=now_iso(), current_phase="Preflight")
-            self.db.add_event(assessment_id, "phase_started", "Preflight", "Preflight checks completed.")
-            self.db.update_assessment(assessment_id, current_phase="Dependencies")
-            self.db.add_event(assessment_id, "phase_completed", "Dependencies", "Command runner and capability checks are available.")
-            self.db.update_assessment(assessment_id, current_phase="Scope Validation")
-            self.db.add_event(assessment_id, "phase_completed", "Scope Validation", "Authorized scope and capability manifest was persisted before execution.")
+            if not worker_mode:
+                self.db.update_assessment(assessment_id, status="RUNNING", started_at=now_iso(), current_phase="Preflight")
+                self.db.add_event(assessment_id, "phase_started", "Preflight", "Preflight checks completed.")
+                self.db.update_assessment(assessment_id, current_phase="Dependencies")
+                self.db.add_event(assessment_id, "phase_completed", "Dependencies", "Command runner and capability checks are available.")
+                self.db.update_assessment(assessment_id, current_phase="Scope Validation")
+                self.db.add_event(assessment_id, "phase_completed", "Scope Validation", "Authorized scope and capability manifest was persisted before execution.")
             self.db.update_assessment(assessment_id, current_phase="Discovery")
             for target in targets:
                 if target["kind"] == "fixture":
@@ -1230,7 +1368,7 @@ class AssessmentManager:
                     if command_result is not None and command_result.status != "COMPLETED":
                         error_count += 1
                     completed += 1
-                    self.db.update_assessment(assessment_id, completed_units=completed, found_count=counters["FOUND"], not_found_count=counters["NOT_FOUND"], na_count=counters["NA"], inconclusive_count=counters["INCONCLUSIVE"], applicable_count=applicable_count, error_count=error_count)
+                    progress = self._refresh_assessment_progress(assessment_id)
                     self.db.add_event(
                         assessment_id,
                         "testcase_completed" if decision.state == "APPLICABLE" else "testcase_skipped",
@@ -1239,42 +1377,32 @@ class AssessmentManager:
                         status=classification.status,
                         testcase_id=testcase.id,
                         target_id=target["id"],
-                        completed_units=completed,
+                        completed_units=progress["completed_units"],
                         total_units=assessment["total_units"],
                         payload={"command": evidence_source.displayed_command if evidence_source else None, "output_preview": artifact["stdout_preview"], "evidence_paths": artifact["evidence_paths"], "poc_paths": artifact["poc_paths"], "failure_reason": classification.failure_reason, "applicability_state": decision.state},
                     )
                 if cancel.is_set():
                     break
-            if cancel.is_set():
-                self.db.update_assessment(assessment_id, status="CANCELLED", completed_at=now_iso(), current_phase="Cancelled")
-                self.db.add_event(assessment_id, "assessment_cancelled", "Cancelled", "Assessment cancelled at a safe checkpoint.")
+            if worker_mode:
                 return
-            self.db.update_assessment(assessment_id, current_phase="Evidence Verification")
-            self.db.add_event(assessment_id, "phase_completed", "Evidence Verification", "Evidence hashes and provenance were persisted.")
-            self.db.update_assessment(assessment_id, current_phase="AI Triage")
-            recovery_count = len(self.db.list_ai_recovery(assessment_id))
-            if assessment["llm_enabled"] and recovery_count:
+            self._finish_assessment(assessment_id, assessment, cancel)
+        except Exception as error:
+            if worker_mode:
                 self.db.add_event(
                     assessment_id,
-                    "phase_completed",
-                    "AI Triage",
-                    f"Automatic discrepancy analysis completed for {recovery_count} captured discrepancy record(s); deterministic classifications remain authoritative.",
+                    "target_worker_failed",
+                    "Security Checks",
+                    f"Target worker failed safely: {type(error).__name__}",
+                    status="FAILED",
+                    target_id=targets[0]["id"] if targets else None,
+                    payload={"error": str(error)},
                 )
-            else:
-                reason = "disabled by assessment configuration" if not assessment["llm_enabled"] else "no discrepancies required secondary analysis"
-                self.db.add_event(assessment_id, "phase_skipped", "AI Triage", f"Optional local AI skipped: {reason}.")
-            self.db.update_assessment(assessment_id, current_phase="Report Generation")
-            self.db.add_event(assessment_id, "phase_completed", "Report Generation", "Report inputs are complete.")
-            self.db.update_assessment(assessment_id, current_phase="Packaging")
-            self.db.add_event(assessment_id, "phase_started", "Packaging", "Creating CSV and ZIP exports.")
-            exports = export_assessment(self.db, assessment_id, self.settings.data_dir, status_override="COMPLETED")
-            self.db.add_event(assessment_id, "assessment_completed", "Complete", "Assessment and exports completed with persisted evidence.", completed_units=completed, total_units=assessment["total_units"], payload={"csv": str(exports["csv"]), "zip": str(exports["zip"])})
-            self.db.update_assessment(assessment_id, status="COMPLETED", completed_at=now_iso(), current_phase="Complete", current_target=None, current_testcase=None)
-        except Exception as error:
+                return
             self.db.update_assessment(assessment_id, status="FAILED", completed_at=now_iso(), current_phase="Failed")
             self.db.add_event(assessment_id, "assessment_failed", "Failed", f"Assessment stopped: {error}", payload={"error_type": type(error).__name__})
 
     def _run_argv(self, argv: list[str], timeout: float) -> CommandResult:
+        self._command_semaphore.acquire()
         with self._command_metrics_lock:
             self.active_commands += 1
             self.max_active_commands = max(self.max_active_commands, self.active_commands)
@@ -1284,6 +1412,7 @@ class AssessmentManager:
         finally:
             with self._command_metrics_lock:
                 self.active_commands -= 1
+            self._command_semaphore.release()
 
     def _execute_target(self, target: dict, testcase_id: str, cancel: threading.Event, *, recovery: bool = False) -> CommandResult:
         target_obj = NormalizedTarget(target["id"], target["value"], target["label"], target["kind"], target["host_count"])
@@ -1455,7 +1584,11 @@ class AssessmentManager:
                 parameters=parameters,
             )
         if plan.action_id is not None and validation_state != "REJECTED":
-            validation_state = "VALIDATED"
+            # Preserve the provenance of a schema-valid model recommendation;
+            # a plan validated by the allowlist is still distinguishable from
+            # a deterministic fallback in the audit trail.
+            if validation_state != "MODEL_VALIDATED":
+                validation_state = "VALIDATED"
 
         # Keep the original failed execution as provenance, then allow at most
         # the configured bounded retry count.  Each retry must have a changed
@@ -1602,6 +1735,200 @@ class AssessmentManager:
 
         return classify_live(testcase, result) if live else classify(testcase, result, allow_na=False)
 
+    def _version_review_context(self, assessment_id: str, target_id: str) -> tuple[dict, dict, CommandResult, list[dict]]:
+        assessment = self.db.get_assessment(assessment_id)
+        target = self.db.get_target(assessment_id, target_id)
+        result = next((item for item in self.db.list_results(assessment_id, target_id) if item["testcase_id"] == "11"), None)
+        if not assessment or not target or not result:
+            raise ValueError("Testcase 11 is not available for this target")
+        execution = next(
+            (
+                item for item in reversed(self.db.list_executions(assessment_id))
+                if item["target_id"] == target_id and item["testcase_id"] == "11"
+            ),
+            None,
+        )
+        if execution is None:
+            raise ValueError("No preserved software-identification execution is available")
+        command_result = self._recorded_execution_result(
+            self.settings.data_dir / "assessments" / assessment_id,
+            execution,
+        )
+        if command_result is None:
+            raise ValueError("Preserved software-identification evidence could not be verified")
+        entries = parse_version_observations(command_result.combined_output)
+        if not entries:
+            raise ValueError("The completed identification output contains no usable software entries")
+        return assessment, result, command_result, entries
+
+    def version_review(self, assessment_id: str, target_id: str) -> dict[str, object]:
+        assessment, result, command_result, entries = self._version_review_context(assessment_id, target_id)
+        root = self.settings.data_dir / "assessments" / assessment_id
+        target = self.db.get_target(assessment_id, target_id) or {}
+        testcase = next(item for item in TESTCASES if item.id == "11")
+        poc_dir = root / self._target_dir_name(target) / "testcases" / f"11_{safe_name(testcase.condition)}" / "POCs" / "NA" / "Version_Discovery_Observation"
+        poc_paths = [str(path.relative_to(root)) for path in sorted(poc_dir.glob("poc_*.png"))] if poc_dir.is_dir() else []
+        if not poc_paths:
+            pages = render_poc_pngs(command_result.displayed_command, command_result.stdout, command_result.stderr, poc_dir)
+            poc_paths = [str(path.relative_to(root)) for path in pages]
+        return {
+            "assessment_id": assessment_id,
+            "target_id": target_id,
+            "result_id": result["id"],
+            "entries": entries,
+            "poc_paths": poc_paths,
+            "latest_review": (self.db.list_version_reviews(assessment_id, target_id) or [None])[-1],
+            "review_required": result.get("final_verdict") is None,
+            "coverage_reason": result.get("coverage_reason") or result.get("failure_reason"),
+        }
+
+    def submit_version_review(
+        self,
+        assessment_id: str,
+        target_id: str,
+        *,
+        decision: str,
+        selected_entry_ids: list[str],
+        reviewed_entry_ids: list[str],
+        unidentified_acknowledged: bool,
+        operator_note: str = "",
+    ) -> dict[str, object]:
+        if decision not in {"outdated", "none_outdated"}:
+            raise ValueError("Version review decision must be outdated or none_outdated")
+        assessment, result, command_result, entries = self._version_review_context(assessment_id, target_id)
+        validate_review_entries(entries, selected_entry_ids, reviewed_entry_ids)
+        entry_map = {str(item["entry_id"]): item for item in entries}
+        unidentified = [item for item in entries if not item["reviewable"]]
+        if decision == "outdated" and not selected_entry_ids:
+            raise ValueError("Select at least one software entry before marking versions outdated")
+        if set(reviewed_entry_ids) != {str(item["entry_id"]) for item in entries if item["reviewable"]}:
+            raise ValueError("Review every entry with usable version information before finalizing")
+        if unidentified and not unidentified_acknowledged:
+            raise ValueError("Acknowledge unidentified versions before finalizing the review")
+        selected = [entry_map[item] for item in selected_entry_ids]
+        line_1, line_2 = review_descriptions(decision, selected, unidentified)
+        verdict = "FOUND" if decision == "outdated" else "NOT_FOUND"
+        root = self.settings.data_dir / "assessments" / assessment_id
+        target = self.db.get_target(assessment_id, target_id) or {}
+        testcase = next(item for item in TESTCASES if item.id == "11")
+        condition_dir = root / self._target_dir_name(target) / "testcases" / f"11_{safe_name(testcase.condition)}" / "POCs" / verdict / safe_name(testcase.condition)
+        pages = render_poc_pngs(command_result.displayed_command, command_result.stdout, command_result.stderr, condition_dir)
+        poc_paths = [str(path.relative_to(root)) for path in pages]
+        testcase_dir = condition_dir.parent.parent.parent
+        review_payload = {
+            "assessment_id": assessment_id,
+            "target_id": target_id,
+            "result_id": result["id"],
+            "decision": decision,
+            "selected_entries": selected,
+            "reviewed_entries": [entry_map[item] for item in reviewed_entry_ids],
+            "unidentified_entries": unidentified,
+            "unidentified_acknowledged": unidentified_acknowledged,
+            "operator_note": " ".join(operator_note.split())[:1000],
+            "created_at": now_iso(),
+        }
+        (testcase_dir / "evidence" / "manual_version_review.json").write_text(json.dumps(review_payload, indent=2), encoding="utf-8")
+        evidence_paths = list(result.get("evidence_paths_json") or [])
+        metadata_path = testcase_dir / "evidence" / "manual_version_review.json"
+        evidence_paths.append(str(metadata_path.relative_to(root)))
+        self.db.update_result(
+            int(result["id"]),
+            status=verdict,
+            final_verdict=verdict,
+            coverage_status="COMPLETED",
+            coverage_reason="OPERATOR_REVIEWED_VERSION_DECISION",
+            observation_type="misconfiguration" if verdict == "FOUND" else "vulnerability",
+            reportable_finding=int(verdict == "FOUND"),
+            description_line_1=line_1,
+            description_line_2=line_2,
+            applicability="applicable",
+            conditions_tested_json=[testcase.condition],
+            conditions_confirmed_json=[testcase.condition] if verdict == "FOUND" else [],
+            conditions_not_found_json=[testcase.condition] if verdict == "NOT_FOUND" else [],
+            inconclusive_conditions_json=[],
+            severity="medium" if verdict == "FOUND" else "informational",
+            finding_ids_json=[f"finding-{assessment_id}-{target_id}-11"] if verdict == "FOUND" else [],
+            evidence_paths_json=list(dict.fromkeys(evidence_paths)),
+            poc_paths_json=poc_paths,
+            validation_state="OPERATOR_REVIEWED",
+            failure_reason=None,
+            evidence_id=result.get("evidence_id"),
+            command=command_result.displayed_command,
+            output_preview=command_result.stdout.decode("utf-8", errors="replace")[:1200],
+        )
+        result_json = testcase_dir / "result.json"
+        if result_json.exists():
+            result_payload = json.loads(result_json.read_text(encoding="utf-8"))
+            result_payload.update(
+                {
+                    "status": verdict,
+                    "final_verdict": verdict,
+                    "coverage_status": "COMPLETED",
+                    "coverage_reason": "OPERATOR_REVIEWED_VERSION_DECISION",
+                    "observation_type": "misconfiguration" if verdict == "FOUND" else "vulnerability",
+                    "reportable_finding": verdict == "FOUND",
+                    "description_line_1": line_1,
+                    "description_line_2": line_2,
+                    "poc_paths": poc_paths,
+                    "failure_reason": None,
+                    "manual_review_path": str(metadata_path.relative_to(root)),
+                }
+            )
+            result_json.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
+        review_id = self.db.add_version_review({
+            "assessment_id": assessment_id,
+            "target_id": target_id,
+            "result_id": int(result["id"]),
+            "decision": decision,
+            "selected_entries_json": selected,
+            "reviewed_entries_json": [entry_map[item] for item in reviewed_entry_ids],
+            "unidentified_acknowledged": int(unidentified_acknowledged),
+            "operator_note": review_payload["operator_note"],
+            "created_at": review_payload["created_at"],
+        })
+        self.db.add_adjudication_revision({
+            "assessment_id": assessment_id,
+            "result_id": int(result["id"]),
+            "policy_version": CLASSIFICATION_POLICY_VERSION,
+            "previous_status": str(result["status"]),
+            "previous_verdict": result.get("final_verdict"),
+            "new_status": verdict,
+            "new_verdict": verdict,
+            "reason": "Operator-reviewed software-version classification",
+            "evidence_paths_json": poc_paths + [str(metadata_path.relative_to(root))],
+            "created_at": review_payload["created_at"],
+        })
+        for path in poc_paths + [str(metadata_path.relative_to(root))]:
+            artifact = root / path
+            self.db.add_evidence({
+                "id": f"version-review-{review_id}-{sha256_bytes(path.encode())[:12]}",
+                "result_id": int(result["id"]),
+                "assessment_id": assessment_id,
+                "target_id": target_id,
+                "testcase_id": "11",
+                "artifact_path": path,
+                "kind": artifact.suffix.lstrip(".") or "file",
+                "sha256": sha256_bytes(artifact.read_bytes()),
+                "provenance": {"command_id": command_result.id, "argv": list(command_result.argv), "decision": decision},
+            })
+        self.db.add_event(
+            assessment_id,
+            "version_review_completed",
+            "Manual Version Review",
+            f"Testcase 11 was finalized as {verdict} by explicit operator review.",
+            status=verdict,
+            testcase_id="11",
+            target_id=target_id,
+            payload={"review_id": review_id, "decision": decision, "selected_entry_ids": selected_entry_ids, "unidentified_count": len(unidentified)},
+        )
+        progress = self._refresh_assessment_progress(assessment_id)
+        self.db.update_assessment(
+            assessment_id,
+            completion_outcome="COMPLETED" if progress["inconclusive_count"] == 0 else "COMPLETED_WITH_LIMITATIONS",
+        )
+        export_assessment(self.db, assessment_id, self.settings.data_dir, status_override=assessment.get("status"))
+        return self.version_review(assessment_id, target_id)
+
     @staticmethod
     def _target_dir_name(target: dict) -> str:
         return f"{target['id']}_{safe_name(target['label'])[:80]}"
@@ -1614,7 +1941,38 @@ class AssessmentManager:
         assessment["results"] = self.db.list_results(assessment_id)
         assessment["adjudication_revisions"] = self.db.list_adjudication_revisions(assessment_id)
         assessment.update(self._result_summary(assessment["results"]))
-        assessment["recent_events"] = self.db.list_events(assessment_id)[-100:]
+        events = self.db.list_events(assessment_id)
+        assessment["recent_events"] = events[-100:]
+        progress: list[dict[str, object]] = []
+        for target in assessment["targets"]:
+            target_results = [item for item in assessment["results"] if item["target_id"] == target["id"]]
+            target_events = [item for item in events if item.get("target_id") == target["id"]]
+            last = target_events[-1] if target_events else None
+            awaiting_review = any(
+                item.get("testcase_id") == "11" and not item.get("final_verdict")
+                for item in target_results
+            )
+            if awaiting_review:
+                target_state = "AWAITING_OPERATOR_REVIEW"
+            elif len(target_results) >= len(TESTCASES):
+                target_state = "COMPLETED"
+            elif last and last.get("event") == "target_worker_failed":
+                target_state = "FAILED"
+            elif last:
+                target_state = "RUNNING"
+            else:
+                target_state = "QUEUED"
+            progress.append({
+                "target_id": target["id"],
+                "target": target["value"],
+                "label": target["label"],
+                "state": target_state,
+                "completed_units": len(target_results),
+                "total_units": len(TESTCASES),
+                "last_phase": last.get("phase") if last else "Queued",
+                "last_message": last.get("message") if last else "Waiting for a worker slot",
+            })
+        assessment["target_progress"] = progress
         return assessment
 
     @staticmethod

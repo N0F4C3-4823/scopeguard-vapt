@@ -16,5 +16,9 @@
 - Configured project-managed Ollama startup for documented CPU execution, 2048-token context, one model, one request, bounded queueing, and disabled cloud features; CPU library selection falls back to the portable library when AVX2 is unavailable.
 - Added build diagnostics and a versioned external-accessibility classification policy: confirmed filtered TCP endpoints can become evidence-backed NA without rescanning, UDP `open|filtered` remains explicitly ambiguous, and incomplete checks remain separate operational coverage states.
 - Added safe historical evidence re-adjudication, genuine NA applicability POCs (including scope-only probes), and preserved target-owned command/output provenance for CSV, JSON, and ZIP exports.
+- Replaced curl-based anonymous FTP validation with a bounded native protocol probe that distinguishes a real 230 anonymous-login response, explicit denial, and timeout/failure.
+- Moved HTTP/HTTPS security checks to Nmap's safe HTTP scripts with condition-aware parsing; separated ICMP timestamp/address-mask checks from host reachability and retained DNS UDP/TCP response flags independently.
+- Added operator-reviewed Testcase 11 software/version review with preserved ambiguous and unidentified entries, genuine discovery POCs, auditable decisions, per-target isolation, and no online vulnerability research.
+- Added bounded target-level parallel scheduling for up to 10 concurrent targets, with queued-target backfill, independent progress, evidence, and worker failure boundaries.
 
 Controlled validation remains distinct from exhaustive external vulnerability validation. See the capability matrices under docs/.

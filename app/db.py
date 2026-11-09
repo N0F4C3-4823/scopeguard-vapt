@@ -69,6 +69,7 @@ class Database:
             current_testcase TEXT,
             llm_enabled INTEGER NOT NULL DEFAULT 0,
             evidence_screenshots INTEGER NOT NULL DEFAULT 1
+            ,completion_outcome TEXT NOT NULL DEFAULT 'COMPLETED'
         );
         CREATE TABLE IF NOT EXISTS targets (
             id TEXT PRIMARY KEY,
@@ -195,6 +196,18 @@ class Database:
             evidence_paths_json TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS version_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+            target_id TEXT NOT NULL,
+            result_id INTEGER NOT NULL REFERENCES results(id) ON DELETE CASCADE,
+            decision TEXT NOT NULL,
+            selected_entries_json TEXT NOT NULL DEFAULT '[]',
+            reviewed_entries_json TEXT NOT NULL DEFAULT '[]',
+            unidentified_acknowledged INTEGER NOT NULL DEFAULT 0,
+            operator_note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_events_assessment ON events(assessment_id, id);
         CREATE INDEX IF NOT EXISTS idx_results_assessment ON results(assessment_id, target_id, testcase_id);
         """
@@ -209,6 +222,7 @@ class Database:
                 "permissions_json": "ALTER TABLE assessments ADD COLUMN permissions_json TEXT NOT NULL DEFAULT '[]'",
                 "credentials_available": "ALTER TABLE assessments ADD COLUMN credentials_available INTEGER NOT NULL DEFAULT 0",
                 "applicable_count": "ALTER TABLE assessments ADD COLUMN applicable_count INTEGER NOT NULL DEFAULT 0",
+                "completion_outcome": "ALTER TABLE assessments ADD COLUMN completion_outcome TEXT NOT NULL DEFAULT 'COMPLETED'",
             }
             for column, statement in migrations.items():
                 if column not in columns:
@@ -298,6 +312,7 @@ class Database:
             "current_phase",
             "current_target",
             "current_testcase",
+            "completion_outcome",
         }
         invalid = set(fields) - allowed
         if invalid:
@@ -501,6 +516,35 @@ class Database:
                 "tools_used_json",
             )
             return [_decode(row, fields) for row in rows]
+
+    def add_version_review(self, review: dict[str, Any]) -> int:
+        with self._lock, self.connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO version_reviews
+                (assessment_id,target_id,result_id,decision,selected_entries_json,reviewed_entries_json,
+                 unidentified_acknowledged,operator_note,created_at)
+                VALUES (:assessment_id,:target_id,:result_id,:decision,:selected_entries_json,:reviewed_entries_json,
+                        :unidentified_acknowledged,:operator_note,:created_at)""",
+                {
+                    **review,
+                    "selected_entries_json": _json(review.get("selected_entries_json", [])),
+                    "reviewed_entries_json": _json(review.get("reviewed_entries_json", [])),
+                },
+            )
+            return int(cursor.lastrowid)
+
+    def list_version_reviews(self, assessment_id: str, target_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock, self.connect() as connection:
+            if target_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM version_reviews WHERE assessment_id=? ORDER BY id", (assessment_id,)
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM version_reviews WHERE assessment_id=? AND target_id=? ORDER BY id",
+                    (assessment_id, target_id),
+                ).fetchall()
+            return [_decode(row, ("selected_entries_json", "reviewed_entries_json")) for row in rows]
 
     def add_evidence(self, evidence: dict[str, Any]) -> None:
         with self._lock, self.connect() as connection:

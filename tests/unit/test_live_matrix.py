@@ -53,6 +53,35 @@ def test_redis_probe_receives_configured_protocol_timeout():
     assert command[command.index("--timeout") + 1] == "11"
 
 
+def test_ftp_uses_native_bounded_protocol_probe():
+    command = build_command("18", "127.0.0.1", port_overrides={"21": 2121}, protocol_timeout_seconds=9)
+    assert command is not None
+    assert command[0].endswith("python") or command[0].endswith("python3")
+    assert command[1:3] == ["-m", "app.ftp_probe"]
+    assert command[command.index("--port") + 1] == "2121"
+    assert command[command.index("--timeout") + 1] == "9"
+
+
+def test_icmp_echo_reachability_does_not_become_information_disclosure():
+    result = _nmap_result("Host is up (0.0010s latency).\nNmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n")
+    parsed = parse_live_result("38", result)
+    assert parsed.status == "INCONCLUSIVE"
+    assert parsed.observation_ids == ("live-38-echo-only",)
+
+
+def test_icmp_timestamp_response_is_a_specific_information_observation():
+    result = _nmap_result("ICMP timestamp reply received\nNmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n")
+    parsed = parse_live_result("38", result)
+    assert parsed.status == "FOUND"
+    assert parsed.observation_ids == ("live-38-icmp-information",)
+
+
+def test_dns_root_record_response_does_not_complete_security_predicates():
+    result = _nmap_result(";; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1\n;; flags: qr rd ra; QUERY: 1, ANSWER: 4\n")
+    parsed = parse_live_result("40", result)
+    assert parsed.status == "INCONCLUSIVE"
+
+
 def _nmap_result(text: str) -> CommandResult:
     return CommandResult(
         id="parser-test",

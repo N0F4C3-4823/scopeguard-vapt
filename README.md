@@ -31,6 +31,9 @@ The source repository is public, but assessment data remains local and is exclud
 - Optional CPU-friendly Ollama support using qwen2.5:1.5b-instruct.
 - Service-first discovery keeps TCP and UDP observations separate and avoids using UDP silence as a generic explanation for TCP checks.
 - Target-wise results keep each target's 40 testcase rows, evidence, POCs, and downloads isolated.
+- Multiple targets use a bounded target-level scheduler with up to 10 concurrent workers; queued targets start as slots become available and one target's evidence or operator review never blocks another.
+- Testcase 11 uses an operator-reviewed software-version inventory: ScopeGuard records every Nmap service/version observation, keeps ambiguous or unidentified entries visible, and requires an explicit review decision without online CVE research.
+- Testcase 18 uses a bounded native FTP protocol probe; Testcase 33 uses Nmap HTTP checks; Testcases 38 and 40 keep ICMP information queries and DNS UDP/TCP/flag observations separate from reachability or root-record observations.
 - Finalized FOUND and NOT_FOUND rows expose View POC, Download POC, and browser PNG clipboard copy actions. Every finalized result also exposes one-click Copy Description for its exact two-line explanation.
 
 The live adapter and controlled-service validation boundaries are published in docs/live_capability_matrix.json and docs/security_engine_validation_matrix.json. Controlled fixtures demonstrate reproducibility; they are not evidence of vulnerabilities on external systems.
@@ -91,6 +94,12 @@ After startup, Settings → Local AI can run the application-level schema and ev
 10. Download the verified report ZIP and CSV files.
 
 For a safe local walkthrough, use fixture://mixed. Fixture output is clearly marked as controlled test evidence and must never be mistaken for a real finding.
+
+### Manual software-version review
+
+Testcase 11 intentionally does not browse the internet or infer CVE applicability. After service/version discovery, open the target's **Software Version Review** panel, review every identified entry, select one or more entries and choose **Mark selected versions as outdated**, or choose **No reviewed versions are outdated**. Ambiguous and unidentified entries remain visible; the review cannot be finalized until usable entries are reviewed and unidentified entries are explicitly acknowledged. The original discovery command/output POC and the operator decision are retained separately for auditability. This review is independent per target and does not stop other target workers.
+
+When an assessment contains more than one target, ScopeGuard starts up to 10 target workers concurrently. Additional targets remain queued and are started as soon as a worker slot is released. The per-target results page remains the authoritative view for that target's 40 testcase rows and evidence.
 
 ## Assessment profiles
 

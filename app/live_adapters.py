@@ -104,14 +104,14 @@ _ADAPTERS: dict[str, LiveAdapterDefinition] = {
     "08": _definition("08", status="LIVE", tools=("nmap",), adapter="nmap_ssl_enum_ciphers", parser="tls_cipher_inventory", verification="Deprecated protocol support is FOUND only when the TLS script enumerates it; a complete modern-only enumeration supports NOT_FOUND for that condition.", coverage=("command_execution", "tls_protocol_inventory")),
     "09": _definition("09", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_tftp_state", parser="udp_service_state", verification="TFTP exposure is observed without uploading, overwriting, or claiming file-read access.", coverage=("command_execution", "udp_service_state")),
     "10": _definition("10", status="LIVE", tools=("nmap",), adapter="nmap_telnet_banner", parser="telnet_banner", verification="Plaintext Telnet behavior is FOUND only from a captured Telnet/banner response; no credentials are attempted.", coverage=("command_execution", "plaintext_banner")),
-    "11": _definition("11", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_service_fingerprint", parser="version_corroboration", verification="Product/version evidence is captured, but no CVE is marked applicable without an advisory-aware verifier.", coverage=("command_execution", "version_observation")),
+    "11": _definition("11", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_service_fingerprint", parser="version_corroboration", verification="Nmap service/version evidence is preserved for operator review; no online CVE research or exploitability claim is performed by this testcase.", coverage=("command_execution", "version_observation")),
     "12": _definition("12", status="LIVE", tools=("nmap",), adapter="nmap_tcp_state", parser="tcp_port_state", verification="Only an explicit filtered/closed/open state for a port included in the completed scan is classified.", coverage=("command_execution", "tcp_state")),
     "13": _definition("13", status="LIVE", tools=("nmap",), adapter="nmap_snmp_info", parser="snmp_info", verification="FOUND requires a real SNMP information response to the safe public-community probe; UDP silence is inconclusive.", coverage=("command_execution", "snmp_query")),
     "14": _definition("14", status="CAPABILITY_ONLY", tools=(), adapter="authorized_layer2_sensor_required", parser="none", verification="ARP/MAC protections require an authorized local Layer-2 vantage; no poisoning or MITM action is implemented.", coverage=("applicability_only",), profiles=("internal_unauthenticated", "internal_authenticated", "custom_hybrid")),
     "15": _definition("15", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_http_management_surface", parser="management_surface", verification="Management exposure is reported only for an observed management marker in an actual HTTP response; no credential attack occurs.", coverage=("command_execution", "http_metadata")),
     "16": _definition("16", status="LIVE", tools=("nmap",), adapter="nmap_smb_enum_shares", parser="smb_share_access", verification="FOUND requires an actual unauthenticated share/file-access observation; access denial supports NOT_FOUND for that tested condition.", coverage=("command_execution", "share_enumeration")),
     "17": _definition("17", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_snmp_info", parser="snmp_version_posture", verification="SNMP version observations are retained, but a version alone is not called a vulnerability.", coverage=("command_execution", "snmp_query")),
-    "18": _definition("18", status="LIVE", tools=("curl",), adapter="curl_ftp_anonymous", parser="ftp_anonymous_response", verification="FOUND requires a real FTP 230 response to the anonymous login probe; an explicit 530 denial supports NOT_FOUND.", coverage=("command_execution", "anonymous_login_check")),
+    "18": _definition("18", status="LIVE", tools=("python",), adapter="python_ftp_anonymous", parser="ftp_anonymous_response", verification="FOUND requires a real FTP 230 response to the anonymous login probe; an explicit 530 denial supports NOT_FOUND.", coverage=("command_execution", "anonymous_login_check")),
     "19": _definition("19", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_tcp_inventory", parser="reachability_observation_only", verification="Reachability is preserved as evidence only; this adapter never turns port reachability alone into FOUND or NOT_FOUND.", coverage=("command_execution", "tcp_inventory")),
     "20": _definition("20", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_messaging_inventory", parser="messaging_inventory", verification="Endpoint exposure alone is not an unauthenticated data/action finding; no messages are published or changed.", coverage=("command_execution", "service_inventory")),
     "21": _definition("21", status="LIVE", tools=("nmap",), adapter="nmap_smb_security", parser="smb_security_posture", verification="SMB signing/dialect posture is classified only from the safe NSE output; no relay, MITM, or exploit is attempted.", coverage=("command_execution", "smb_security")),
@@ -126,14 +126,14 @@ _ADAPTERS: dict[str, LiveAdapterDefinition] = {
     "30": _definition("30", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_ike_version", parser="vpn_negotiation_observation", verification="IKE/SSL-VPN negotiation data is captured without destructive negotiation or credential attempts; weakness claims remain limited.", coverage=("command_execution", "vpn_observation")),
     "31": _definition("31", status="CAPABILITY_ONLY", tools=(), adapter="authorized_inventory_sensor_required", parser="none", verification="Rogue-device status requires an authorized asset inventory; a host observed on a network is never guessed to be rogue.", coverage=("applicability_only",), profiles=("internal_unauthenticated", "internal_authenticated", "custom_hybrid")),
     "32": _definition("32", status="CAPABILITY_ONLY", tools=(), adapter="authorized_wireless_sensor_required", parser="none", verification="Wireless posture requires authorized proximity and suitable hardware; WSL limitations are reported rather than bypassed.", coverage=("applicability_only",), profiles=("internal_unauthenticated", "internal_authenticated", "custom_hybrid")),
-    "33": _definition("33", status="LIVE", tools=("curl",), adapter="curl_http_security_headers", parser="http_security_headers", verification="A response with a missing required security header is FOUND; a complete response with the required header is NOT_FOUND for that precise condition.", coverage=("command_execution", "http_headers")),
+    "33": _definition("33", status="LIVE", tools=("nmap",), adapter="nmap_http_security_checks", parser="nmap_http_security_headers_and_methods", verification="Each supported HTTP condition is evaluated from safe Nmap script output; one present header never establishes broad HTTP security.", coverage=("command_execution", "http_security_headers", "http_methods")),
     "34": _definition("34", status="LIVE", tools=("nmap",), adapter="nmap_ssh_algorithms", parser="ssh_algorithm_posture", verification="Weak SSH algorithms are FOUND only when enumerated by ssh2-enum-algos; a complete algorithm list without the tested weak algorithms supports NOT_FOUND.", coverage=("command_execution", "ssh_configuration")),
     "35": _definition("35", status="LIVE", tools=("nmap",), adapter="nmap_host_discovery", parser="host_reachability", verification="Host-up is FOUND from a completed multi-signal discovery response; lack of a response remains INCONCLUSIVE.", coverage=("command_execution", "host_discovery")),
     "36": _definition("36", status="LIVE", tools=("nmap",), adapter="nmap_rpcinfo", parser="rpc_mapping", verification="RPC mapping is FOUND only when an actual rpcinfo response discloses a program/endpoint.", coverage=("command_execution", "rpc_mapping")),
     "37": _definition("37", status="LIVE", tools=("nmap",), adapter="nmap_vnc_info", parser="vnc_authentication", verification="VNC no-auth is FOUND only from vnc-info output; an explicit authentication type supports NOT_FOUND.", coverage=("command_execution", "vnc_configuration")),
-    "38": _definition("38", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_icmp_discovery", parser="icmp_response", verification="An actual ICMP response is recorded as an observation; absence of response is never a negative security conclusion.", coverage=("command_execution", "icmp_discovery")),
+    "38": _definition("38", status="LIVE_LIMITED", tools=("nmap",), adapter="nmap_icmp_information_queries", parser="icmp_information_response", verification="Echo reachability is not disclosure; only explicit timestamp/address-mask information responses are evaluated.", coverage=("command_execution", "icmp_information_queries")),
     "39": _definition("39", status="LIVE", tools=("nmap",), adapter="nmap_ssh_algorithms", parser="ssh_vulnerability_posture", verification="Specific SSH cryptographic weaknesses require an actual weak algorithm listing; no duplicate network work is required beyond the valid scan.", coverage=("command_execution", "ssh_configuration")),
-    "40": _definition("40", status="LIVE_LIMITED", tools=("dig",), adapter="dig_authorized_dns_query", parser="dns_response", verification="DNS responses are captured, but recursion/zone-transfer conclusions require an explicitly authorized zone and matching evidence.", coverage=("command_execution", "dns_query")),
+    "40": _definition("40", status="LIVE_LIMITED", tools=("dig", "nmap"), adapter="dig_dns_udp_tcp_and_nmap", parser="dns_response_flags", verification="UDP/TCP response behavior and DNS flags are preserved independently; recursion or transfer conclusions require matching authorized evidence.", coverage=("command_execution", "dns_udp", "dns_tcp", "dns_flags")),
 }
 
 
@@ -151,7 +151,7 @@ _CONTROLLED_VALIDATION: dict[str, tuple[str, ...]] = {
     "08": ("modern TLS-only service -> NOT_FOUND; weak/deprecated protocol if supported -> FOUND",),
     "09": ("TFTP state response -> INCONCLUSIVE; UDP silence -> INCONCLUSIVE",),
     "10": ("Telnet plaintext banner -> FOUND; closed port -> NA",),
-    "11": ("specific version banner -> INCONCLUSIVE pending advisory verification",),
+    "11": ("version inventory -> AWAITING_OPERATOR_REVIEW; explicit outdated selection -> FOUND; reviewed none outdated -> NOT_FOUND; unidentified entries remain a limitation",),
     "12": ("closed/open tested ports -> NOT_FOUND for filtering; filtered state -> FOUND",),
     "13": ("SNMP public response -> FOUND; denied/malformed response -> INCONCLUSIVE",),
     "14": ("capability-only; no Layer-2 sensor",),
@@ -304,9 +304,8 @@ def build_command(
     if testcase_id == "18":
         port = ports.get("21", 21)
         return [
-            "curl", "--silent", "--show-error", "--include", "--disable-epsv",
-            "--user", "anonymous:IEUser@", "--list-only", "--connect-timeout", str(max(1, int(tcp_connect_timeout_seconds))),
-            "--max-time", str(max(1, int(protocol_timeout_seconds))), "--url", f"ftp://{target}:{port}/",
+            sys.executable, "-m", "app.ftp_probe", "--target", target,
+            "--port", str(port), "--timeout", str(max(1, int(protocol_timeout_seconds))),
         ]
     if testcase_id == "20":
         keys = ("1883", "8883")
@@ -335,7 +334,12 @@ def build_command(
         return nmap(target, ",".join(str(ports.get(f"{item}/udp", item)) for item in (500, 4500)), scripts=("ike-version",), udp=True)
     if testcase_id == "33":
         port = ports.get("80", 80)
-        return ["curl", "--silent", "--show-error", "--include", "--connect-timeout", str(max(1, int(tcp_connect_timeout_seconds))), "--max-time", str(max(1, int(protocol_timeout_seconds))), "--url", f"http://{target}:{port}/"]
+        return nmap(
+            target,
+            str(port),
+            scripts=("http-security-headers", "http-methods", "http-title", "http-headers"),
+            service_detection=True,
+        )
     if testcase_id in {"34", "39"}:
         return nmap(target, str(ports.get("22", 22)), scripts=("ssh2-enum-algos",), service_detection=True)
     if testcase_id == "35":
@@ -347,7 +351,7 @@ def build_command(
     if testcase_id == "37":
         return nmap(target, str(ports.get("5900", 5900)), scripts=("vnc-info",), service_detection=True)
     if testcase_id == "38":
-        return ["nmap", "-sn", "-PE", "-PP", "-PM", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
+        return ["nmap", "-sn", "-PP", "-PM", "--host-timeout", f"{host_timeout}s", "--max-retries", str(max(0, int(nmap_max_retries))), "--reason", target]
     if testcase_id == "40":
         transport = dns_transport or "udp"
         if transport not in {"tcp", "udp"}:
@@ -356,8 +360,9 @@ def build_command(
             "dig",
             f"+time={max(1, int(protocol_timeout_seconds))}",
             "+tries=1",
-            "+noall",
+            "+comments",
             "+answer",
+            "+stats",
             *(["+tcp"] if transport == "tcp" else []),
             f"@{target}",
             ".",
@@ -475,13 +480,11 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("FOUND", "applicable", None, ("live-18-anonymous-ftp",), "high", "VALIDATED")
         if re.search(r"(?:^|\s)530\s|not logged in|authentication required", lower):
             return LiveParse("NOT_FOUND", "applicable", None, ("live-18-anonymous-denied",), "informational", "VALIDATED")
-        if result.exit_code == 7 and _connection_refused(lower):
+        if result.exit_code not in {0, None} and _connection_refused(lower):
             return LiveParse("NA", "No applicable FTP service was observed", "FTP control connection was explicitly refused", ("live-18-ftp-refused",), "informational", "APPLICABILITY_CONFIRMED")
-        if result.status == "COMPLETED" and result.exit_code == 0 and result.stdout.strip():
-            return LiveParse("FOUND", "applicable", None, ("live-18-anonymous-ftp-listing",), "high", "VALIDATED")
         if result.exit_code != 0 or result.status != "COMPLETED":
             return _inconclusive(f"FTP anonymous probe failed with exit status {result.exit_code}")
-        return _inconclusive("FTP response did not establish anonymous access or denial")
+        return _inconclusive("FTP protocol responses did not establish anonymous access or explicit denial")
     if testcase_id in {"24", "27", "33", "40"} and result.exit_code != 0 and _connection_refused(lower):
         labels = {
             "24": ("Redis", "live-24-redis-refused"),
@@ -518,10 +521,16 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
         if "host is up" in lower and "nmap done:" in lower:
             return LiveParse("FOUND", "applicable", None, ("live-35-host-up",), "informational", "VALIDATED")
         return _inconclusive("lack of discovery response cannot prove that a host is down")
-    if testcase_id in {"29", "38"}:
+    if testcase_id == "29":
         if "host is up" in lower:
-            return _inconclusive("a discovery response was captured, but it does not establish the requested IPv6/ICMP security predicate", observation=f"live-{testcase_id}-response")
-        return _inconclusive("lack of an ICMP/IPv6 response cannot prove protection or absence")
+            return _inconclusive("an IPv6 discovery response was captured, but it does not establish router-advertisement security", observation="live-29-response")
+        return _inconclusive("lack of an IPv6 response cannot prove protection or absence")
+    if testcase_id == "38":
+        if re.search(r"timestamp\s+reply|icmp.*timestamp|address[ -]?mask", lower):
+            return LiveParse("FOUND", "applicable", None, ("live-38-icmp-information",), "medium", "VALIDATED")
+        if "host is up" in lower:
+            return _inconclusive("an echo reachability response was captured, but it does not establish ICMP information disclosure", observation="live-38-echo-only")
+        return _inconclusive("lack of an ICMP information response cannot prove protection or absence")
     if testcase_id == "12":
         if any(state == "filtered" for _port, _protocol, state, _service in states):
             return LiveParse("FOUND", "applicable", None, ("live-12-filtered-port",), "informational", "VALIDATED")
@@ -675,15 +684,26 @@ def parse_live_result(testcase_id: str, result: CommandResult) -> LiveParse:
             return LiveParse("FOUND", "applicable", None, ("live-27-specific-version",), "medium", "VALIDATED")
         return LiveParse("NOT_FOUND", "applicable", None, ("live-27-no-specific-version",), "informational", "VALIDATED")
     if testcase_id == "33":
+        if re.search(r"x-content-type-options:\s*(?:nosniff|present)\b", text, re.I):
+            return LiveParse("NOT_FOUND", "applicable", None, ("live-33-nosniff-present",), "informational", "VALIDATED")
+        if re.search(r"x-content-type-options:\s*(missing|absent|not\s+set)\b", text, re.I):
+            return LiveParse("FOUND", "applicable", None, ("live-33-nosniff-missing",), "medium", "VALIDATED")
+        if re.search(r"\|\s*http-headers:\s*", text, re.I) and re.search(r"request type:\s*(?:get|head)", text, re.I):
+            return LiveParse("FOUND", "applicable", None, ("live-33-nosniff-missing",), "medium", "VALIDATED")
+        if "potentially risky methods" in lower or re.search(r"http-methods:.*\b(?:put|delete|trace|connect)\b", lower, re.S):
+            return LiveParse("FOUND", "applicable", None, ("live-33-risky-http-method",), "medium", "VALIDATED")
         if not re.search(r"^HTTP/\S+\s+\d+", text, re.I | re.MULTILINE):
             return _inconclusive("HTTP response was not captured completely")
-        if re.search(r"^x-content-type-options:\s*nosniff\b", text, re.I | re.MULTILINE):
-            return LiveParse("NOT_FOUND", "applicable", None, ("live-33-nosniff-present",), "informational", "VALIDATED")
-        return LiveParse("FOUND", "applicable", None, ("live-33-nosniff-missing",), "medium", "VALIDATED")
+        return _inconclusive("HTTP security checks did not produce a supported condition-specific observation")
     if testcase_id == "40":
-        if re.search(r"^status:\s*(refused|servfail)\b", text, re.I | re.MULTILINE):
+        has_status = bool(re.search(r"^;;\s*->>HEADER<<-.*status:\s*\w+", text, re.I | re.MULTILINE))
+        if re.search(r"status:\s*(refused|servfail)\b", text, re.I | re.MULTILINE):
             return _inconclusive("DNS server returned an error, but recursion/transfer applicability was not established", observation="live-40-dns-error")
-        if re.search(r"^status:\s*noerror\b", text, re.I | re.MULTILINE):
-            return _inconclusive("DNS response was captured; an authorized zone and explicit recursion/transfer predicate are required", observation="live-40-dns-response")
+        if re.search(r"status:\s*noerror\b", text, re.I | re.MULTILINE):
+            if re.search(r"flags:.*\b(?:ra|rd)\b", text, re.I):
+                return _inconclusive("DNS response and recursion flags were captured; an authorized recursion or transfer predicate is still required", observation="live-40-dns-response-flags")
+            return _inconclusive("DNS response was captured without recursion flags; an authorized condition-specific predicate is still required", observation="live-40-dns-response")
+        if has_status:
+            return _inconclusive("DNS status was captured without a supported security predicate")
         return _inconclusive("DNS response was incomplete")
     return _inconclusive("No deterministic live parser is registered")

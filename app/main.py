@@ -18,7 +18,7 @@ from .config import Settings, load_settings
 from .db import Database, now_iso
 from .exporter import ExportError, export_assessment, export_target, target_dir_name
 from .live_adapters import capability_matrix
-from .models import AssessmentCreate, AssessmentEdit
+from .models import AssessmentCreate, AssessmentEdit, VersionReviewRequest
 from .ollama import OllamaClient
 from .orchestrator import AssessmentManager
 from .registry import TESTCASES
@@ -286,6 +286,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "results": db.list_results(assessment_id, target_id),
             "ai_recovery": db.list_ai_recovery(assessment_id, target_id),
         }
+
+    @app.get("/api/assessments/{assessment_id}/targets/{target_id}/version-review")
+    async def version_review(assessment_id: str, target_id: str) -> dict[str, Any]:
+        try:
+            return manager.version_review(assessment_id, target_id)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/assessments/{assessment_id}/targets/{target_id}/version-review")
+    async def submit_version_review(assessment_id: str, target_id: str, payload: VersionReviewRequest) -> dict[str, Any]:
+        try:
+            return manager.submit_version_review(
+                assessment_id,
+                target_id,
+                decision=payload.decision,
+                selected_entry_ids=payload.selected_entry_ids,
+                reviewed_entry_ids=payload.reviewed_entry_ids,
+                unidentified_acknowledged=payload.unidentified_acknowledged,
+                operator_note=payload.operator_note,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/api/assessments/{assessment_id}/targets/{target_id}/export/csv")
     async def target_export_csv(assessment_id: str, target_id: str) -> FileResponse:

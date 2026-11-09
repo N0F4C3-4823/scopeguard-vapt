@@ -314,6 +314,8 @@
     {
       "testcase_id": "11",
       "live_status": "LIVE_LIMITED",
+      "command_scope": "safe, rate-limited, read-only network observation",
+      "has_live_execution": true,
       "required_tools": [
         "nmap"
       ],
@@ -337,9 +339,9 @@
       ],
       "id": "11",
       "condition": "Version_CVE_Applicability",
-      "verification_logic": "Product/version evidence is captured, but no CVE is marked applicable without an advisory-aware verifier.",
+      "verification_logic": "Nmap service/version evidence is preserved for operator review; no online CVE research or exploitability claim is performed by this testcase.",
       "controlled_validation": [
-        "specific version banner -> INCONCLUSIVE pending advisory verification"
+        "version inventory -> AWAITING_OPERATOR_REVIEW; explicit outdated selection -> FOUND; reviewed none outdated -> NOT_FOUND; unidentified entries remain a limitation"
       ]
     },
     {
@@ -532,7 +534,7 @@
       "testcase_id": "18",
       "live_status": "LIVE",
       "required_tools": [
-        "curl"
+        "python"
       ],
       "required_vantage": [
         "external"
@@ -540,7 +542,7 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "execution_adapter": "curl_ftp_anonymous",
+      "execution_adapter": "python_ftp_anonymous",
       "evidence_parser": "ftp_anonymous_response",
       "supported_profiles": [
         "external_unauthenticated",
@@ -994,7 +996,7 @@
       "testcase_id": "33",
       "live_status": "LIVE",
       "required_tools": [
-        "curl"
+        "nmap"
       ],
       "required_vantage": [
         "external"
@@ -1002,8 +1004,8 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "execution_adapter": "curl_http_security_headers",
-      "evidence_parser": "http_security_headers",
+      "execution_adapter": "nmap_http_security_checks",
+      "evidence_parser": "nmap_http_security_headers_and_methods",
       "supported_profiles": [
         "external_unauthenticated",
         "internal_unauthenticated",
@@ -1012,11 +1014,12 @@
       ],
       "coverage": [
         "command_execution",
-        "http_headers"
+        "http_security_headers",
+        "http_methods"
       ],
       "id": "33",
       "condition": "Web_Configuration",
-      "verification_logic": "A response with a missing required security header is FOUND; a complete response with the required header is NOT_FOUND for that precise condition.",
+      "verification_logic": "Each supported HTTP condition is evaluated from safe Nmap script output; one present header never establishes broad HTTP security.",
       "controlled_validation": [
         "missing X-Content-Type-Options -> FOUND; nosniff present -> NOT_FOUND"
       ]
@@ -1157,8 +1160,8 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "execution_adapter": "nmap_icmp_discovery",
-      "evidence_parser": "icmp_response",
+      "execution_adapter": "nmap_icmp_information_queries",
+      "evidence_parser": "icmp_information_response",
       "supported_profiles": [
         "external_unauthenticated",
         "internal_unauthenticated",
@@ -1167,11 +1170,11 @@
       ],
       "coverage": [
         "command_execution",
-        "icmp_discovery"
+        "icmp_information_queries"
       ],
       "id": "38",
       "condition": "ICMP_Disclosure",
-      "verification_logic": "An actual ICMP response is recorded as an observation; absence of response is never a negative security conclusion.",
+      "verification_logic": "Echo reachability is not disclosure; only explicit timestamp/address-mask information responses are evaluated.",
       "controlled_validation": [
         "ICMP response -> INCONCLUSIVE observation; no response -> INCONCLUSIVE"
       ]
@@ -1211,7 +1214,8 @@
       "testcase_id": "40",
       "live_status": "LIVE_LIMITED",
       "required_tools": [
-        "dig"
+        "dig",
+        "nmap"
       ],
       "required_vantage": [
         "external"
@@ -1219,8 +1223,8 @@
       "required_permissions": [],
       "required_capabilities": [],
       "requires_credentials": false,
-      "execution_adapter": "dig_authorized_dns_query",
-      "evidence_parser": "dns_response",
+      "execution_adapter": "dig_dns_udp_tcp_and_nmap",
+      "evidence_parser": "dns_response_flags",
       "supported_profiles": [
         "external_unauthenticated",
         "internal_unauthenticated",
@@ -1229,11 +1233,13 @@
       ],
       "coverage": [
         "command_execution",
-        "dns_query"
+        "dns_udp",
+        "dns_tcp",
+        "dns_flags"
       ],
       "id": "40",
       "condition": "DNS_Recursion_Transfer",
-      "verification_logic": "DNS responses are captured, but recursion/zone-transfer conclusions require an explicitly authorized zone and matching evidence.",
+      "verification_logic": "UDP/TCP response behavior and DNS flags are preserved independently; recursion or transfer conclusions require matching authorized evidence.",
       "controlled_validation": [
         "DNS response without authorized zone predicate -> INCONCLUSIVE"
       ]
