@@ -1,10 +1,10 @@
 """Build and policy identifiers exposed by the running application."""
 
 APP_VERSION = "1.0.0-beta.1"
-BUILD_ID = "scopeguard-2026.11.09-filtered-na-poc"
+BUILD_ID = "scopeguard-2026.11.09-manual-review-parallel"
 CLASSIFICATION_POLICY_VERSION = "classification-v3-external-accessibility"
 ASSESSMENT_WORKER_VERSION = "worker-v3-evidence-reconciliation"
-FRONTEND_BUILD_ID = "frontend-2026.11.09-filtered-na-poc"
+FRONTEND_BUILD_ID = "frontend-2026.11.09-manual-review-parallel"
 
 
 def as_dict() -> dict[str, str]:
