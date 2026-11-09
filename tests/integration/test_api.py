@@ -29,6 +29,36 @@ def test_api_requires_authorization(application):
     assert "authorization" in response.json()["detail"].lower()
 
 
+def test_api_derives_live_execution_profile_for_real_authorized_target(application):
+    client = TestClient(application)
+    response = client.post(
+        "/api/assessments",
+        json={
+            "name": "Authorized live target",
+            "targets": ["127.0.0.1"],
+            "authorized": True,
+            "authorization_note": "Explicit loopback authorization for this test",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["profile"] == "authorized_external"
+
+
+def test_api_rejects_mixed_fixture_and_live_scope(application):
+    client = TestClient(application)
+    response = client.post(
+        "/api/assessments",
+        json={
+            "name": "Mixed scope must be rejected",
+            "targets": ["fixture://mixed", "127.0.0.1"],
+            "authorized": True,
+            "authorization_note": "Explicit test authorization",
+        },
+    )
+    assert response.status_code == 400
+    assert "mix" in response.json()["detail"].lower()
+
+
 def test_api_exposes_complete_machine_readable_live_capability_matrix(application):
     client = TestClient(application)
     response = client.get("/api/capability-matrix")

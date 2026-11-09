@@ -36,13 +36,16 @@ class AssessmentManager:
     def create(self, payload: AssessmentCreate) -> dict:
         if not payload.authorized:
             raise ValueError("Operator authorization must be affirmed before creating an assessment")
-        if payload.profile == "authorized_external" and not payload.authorization_note.strip():
-            raise ValueError("An authorization note is required for an external assessment")
         targets = parse_scope(payload.targets, payload.excludes, self.settings.max_cidr_hosts, payload.target_labels)
-        if payload.profile == "controlled_fixture" and any(target.kind != "fixture" for target in targets):
-            raise ValueError("Controlled fixture profile accepts only fixture:// targets")
-        if payload.profile == "authorized_external" and any(target.kind == "fixture" for target in targets):
-            raise ValueError("Authorized external profile cannot include controlled fixture targets")
+        has_fixture_targets = any(target.kind == "fixture" for target in targets)
+        has_live_targets = any(target.kind != "fixture" for target in targets)
+        if has_fixture_targets and has_live_targets:
+            raise ValueError("Do not mix controlled fixture targets with live authorized targets in one assessment")
+        execution_profile = "controlled_fixture" if has_fixture_targets else "authorized_external"
+        if execution_profile == "authorized_external" and not payload.authorization_note.strip():
+            raise ValueError("An authorization note is required for a live authorized assessment")
+        if execution_profile == "controlled_fixture" and payload.profile == "authorized_external":
+            raise ValueError("Controlled fixture assessments must use fixture:// targets only")
         assessment_id = f"assessment-{uuid.uuid4().hex[:12]}"
         created_at = now_iso()
         capabilities = sorted(set(payload.capabilities))
@@ -53,7 +56,10 @@ class AssessmentManager:
             "client_name": payload.client_name.strip(),
             "description": payload.description.strip(),
             "status": "DRAFT",
-            "profile": payload.profile,
+            # The execution profile is derived from the normalized scope. This
+            # prevents a stale/default UI value from routing a real target to
+            # the fixture runner while retaining an explicit audit field.
+            "profile": execution_profile,
             "assessment_type": payload.assessment_type,
             "capabilities_json": json.dumps(capabilities),
             "permissions_json": json.dumps(permissions),

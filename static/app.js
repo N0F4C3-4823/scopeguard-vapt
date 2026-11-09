@@ -197,7 +197,7 @@ function renderNewAssessment() {
         <h2>Choose the testing context</h2><p class="panel-lead">This selection guides per-condition applicability. It never grants access, adds targets, or turns missing capabilities into findings.</p>
         <div class="profile-grid">${assessmentTypes.map((item) => `<button type="button" class="profile-card ${wizard.type === item.id ? "selected" : ""}" data-select-type="${item.id}" aria-pressed="${wizard.type === item.id}"><input class="profile-radio" type="radio" name="assessment-type-card" value="${item.id}" ${wizard.type === item.id ? "checked" : ""} tabindex="-1" /><h3>${item.title}<br><span class="muted">${item.subtitle}</span></h3><p>${item.description}</p></button>`).join("")}</div>
         <details class="details"><summary>Advanced capabilities and permissions</summary><div class="form-grid" style="margin-top:16px"><div class="form-field"><label>Available capabilities</label><label class="checkline"><input id="cap-internal" type="checkbox" value="internal_vantage" ${wizard.capabilities.includes("internal_vantage") ? "checked" : ""} /> <span>Authorized internal vantage point</span></label><label class="checkline"><input id="cap-layer2" type="checkbox" value="layer2_access" ${wizard.capabilities.includes("layer2_access") ? "checked" : ""} /> <span>Layer-2 access</span></label><label class="checkline"><input id="cap-wireless" type="checkbox" value="wireless_adapter" ${wizard.capabilities.includes("wireless_adapter") ? "checked" : ""} /> <span>Wireless adapter and proximity</span></label><label class="checkline"><input id="cap-egress" type="checkbox" value="egress_vantage" ${wizard.capabilities.includes("egress_vantage") ? "checked" : ""} /> <span>Approved egress vantage</span></label><label class="checkline"><input id="cap-inventory" type="checkbox" value="asset_inventory" ${wizard.capabilities.includes("asset_inventory") ? "checked" : ""} /> <span>Authorized asset inventory</span></label></div><div class="form-field"><label>Explicit permissions</label><label class="checkline"><input id="perm-segmentation" type="checkbox" value="segmentation_testing" ${wizard.permissions.includes("segmentation_testing") ? "checked" : ""} /> <span>Segmentation testing</span></label><label class="checkline"><input id="perm-layer2" type="checkbox" value="layer2_testing" ${wizard.permissions.includes("layer2_testing") ? "checked" : ""} /> <span>Layer-2 testing</span></label><label class="checkline"><input id="perm-egress" type="checkbox" value="egress_testing" ${wizard.permissions.includes("egress_testing") ? "checked" : ""} /> <span>Egress testing</span></label><label class="checkline"><input id="perm-inventory" type="checkbox" value="inventory_access" ${wizard.permissions.includes("inventory_access") ? "checked" : ""} /> <span>Inventory access</span></label><label class="checkline"><input id="perm-wireless" type="checkbox" value="wireless_testing" ${wizard.permissions.includes("wireless_testing") ? "checked" : ""} /> <span>Wireless testing</span></label><label class="checkline"><input id="perm-policy" type="checkbox" value="credential_policy_testing" ${wizard.permissions.includes("credential_policy_testing") ? "checked" : ""} /> <span>Credential policy testing</span></label></div></div></details>
-        <div class="form-field" style="margin-top:19px"><label for="profile-visible">Run mode</label><select id="profile-visible"><option value="controlled_fixture" ${wizard.profile === "controlled_fixture" ? "selected" : ""}>Controlled local fixture — safe development run</option><option value="authorized_external" ${wizard.profile === "authorized_external" ? "selected" : ""}>Authorized target — written authorization required</option></select><span class="helper">External mode is blocked unless the entered scope and authorization record pass backend validation.</span></div>
+        <div class="form-field" style="margin-top:19px"><label for="profile-visible">Execution profile</label><select id="profile-visible" disabled><option value="controlled_fixture" ${wizard.profile === "controlled_fixture" ? "selected" : ""}>Controlled local fixture — safe development run</option><option value="authorized_external" ${wizard.profile === "authorized_external" ? "selected" : ""}>Authorized live target — written authorization required</option></select><span class="helper">Selected automatically from the scope: fixture:// targets use the controlled runner; IPs, hostnames, IPv6 addresses, and CIDRs use the authorized live runner.</span></div>
         <div class="callout danger wizard-error" data-wizard-error="3" role="alert" hidden></div><div class="form-actions"><button class="button" type="button" data-wizard-prev="2">← Back</button><div class="right"><button class="button button-primary" type="button" data-wizard-next="4">Continue <span aria-hidden="true">→</span></button></div></div>
       </section>
       <section class="panel wizard-panel" data-wizard-panel="4" ${wizard.step === 4 ? "" : "hidden"}>
@@ -229,7 +229,16 @@ function captureWizardOptions() {
   wizard.targets = $("#targets")?.value || wizard.targets;
   wizard.excludes = $("#excludes")?.value || wizard.excludes;
   wizard.type = $("#assessment-type")?.value || wizard.type;
-  wizard.profile = $("#profile-visible")?.value || wizard.profile;
+  const targetValues = splitTargets(wizard.targets);
+  const hasFixtureTargets = targetValues.some((value) => value.toLowerCase().startsWith("fixture://"));
+  const hasLiveTargets = targetValues.some((value) => !value.toLowerCase().startsWith("fixture://"));
+  // Execution mode follows the normalized scope. A real target must never be
+  // sent through the fixture adapter because a stale form default says so.
+  if (hasLiveTargets && !hasFixtureTargets) wizard.profile = "authorized_external";
+  else if (hasFixtureTargets && !hasLiveTargets) wizard.profile = "controlled_fixture";
+  else wizard.profile = $("#profile-visible")?.value || wizard.profile;
+  if ($("#profile-visible")) $("#profile-visible").value = wizard.profile;
+  if ($("#profile")) $("#profile").value = wizard.profile;
   wizard.authorizationNote = $("#authorization-note")?.value || wizard.authorizationNote;
   wizard.authorized = Boolean($("#authorized")?.checked);
   wizard.credentials = Boolean($("#credentials-available")?.checked);
@@ -290,7 +299,15 @@ function validateWizardStep(step) {
   clearWizardError();
   captureWizardOptions();
   if (step === 1 && !state.wizard.name.trim()) { showWizardError("Give this assessment a name before continuing.", "#assessment-name"); return false; }
-  if (step === 2) { const analysis = targetAnalysis(); if (!analysis.entries.length) { showWizardError("Add at least one authorized target before continuing.", "#targets"); return false; } if (analysis.invalid.length) { showWizardError("One or more targets need attention. Correct the highlighted values before continuing.", "#targets"); return false; } }
+  if (step === 2) {
+    const analysis = targetAnalysis();
+    if (!analysis.entries.length) { showWizardError("Add at least one authorized target before continuing.", "#targets"); return false; }
+    if (analysis.invalid.length) { showWizardError("One or more targets need attention. Correct the highlighted values before continuing.", "#targets"); return false; }
+    const effective = analysis.valid.map((item) => item.value.toLowerCase());
+    const hasFixtureTargets = effective.some((value) => value.startsWith("fixture://"));
+    const hasLiveTargets = effective.some((value) => !value.startsWith("fixture://"));
+    if (hasFixtureTargets && hasLiveTargets) { showWizardError("Use either controlled fixtures or live authorized targets in one assessment, not both.", "#targets"); return false; }
+  }
   if (step === 3 && !assessmentTypes.some((item) => item.id === state.wizard.type)) { showWizardError("Choose an assessment type before continuing."); return false; }
   if (step === 4) { if (!state.wizard.authorized) { showWizardError("Confirm that the targets are authorized and within scope.", "#authorized"); return false; } if (state.wizard.profile === "authorized_external" && !state.wizard.authorizationNote.trim()) { showWizardError("Add the written authorization reference for an authorized target assessment.", "#authorization-note"); return false; } }
   return true;
