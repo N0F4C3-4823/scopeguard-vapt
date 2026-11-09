@@ -16,7 +16,7 @@ chmod +x install.sh start.sh
 
 Open http://127.0.0.1:8000. The control plane binds to localhost by default. Use ./start.sh --port 8001 for another local port.
 
-The repository is private to the authenticated owner. Do not run assessments until the targets are explicitly authorized.
+The source repository is public, but assessment data remains local and is excluded from version control. Do not run assessments until the targets are explicitly authorized.
 
 ## What is included
 
@@ -24,8 +24,8 @@ The repository is private to the authenticated owner. Do not run assessments unt
 - Exactly 40 registered testcase records, with 34 live execution adapter paths and six capability-only conditions that require internal, Layer-2, wireless, inventory, egress, or credential-policy capabilities.
 - Target normalization, duplicate detection, bounded CIDR expansion, exclusions, authorization records, and scope locking.
 - Real allowlisted subprocess execution with argv, timeout, exit status, stdout/stderr, tool version, hashes, and provenance.
-- Deterministic FOUND, NOT_FOUND, NA, and INCONCLUSIVE classification. The local LLM is never authoritative.
-- Exact per-testcase POCs/FOUND/ and POCs/NOT_FOUND/ hierarchy. PNG POCs render only the original executed command and captured output.
+- Deterministic FOUND, NOT_FOUND, and NA client verdicts. Incomplete execution is kept as an internal coverage state and is never presented as a security verdict; the local LLM is never authoritative.
+- Exact per-testcase POCs/FOUND/, POCs/NOT_FOUND/, and evidence-backed POCs/NA/ hierarchy. PNG POCs render only the original executed command and captured output.
 - CSV, JSON, summary, raw evidence, manifest, and atomic ZIP exports.
 - Persisted assessment history, live progress, cancellation/recovery handling, and dependency diagnostics.
 - Optional CPU-friendly Ollama support using qwen2.5:1.5b-instruct.
@@ -96,14 +96,14 @@ For a safe local walkthrough, use fixture://mixed. Fixture output is clearly mar
 
 External unauthenticated is appropriate for an outside-in view without credentials. Internal unauthenticated and internal authenticated require an authorized internal vantage point and, for authenticated checks, approved credentials. Custom/hybrid lets the operator declare capabilities explicitly.
 
-Internal placement alone is never proof of Layer-2 access, wireless, egress visibility, asset inventory, credentials, or special permissions. Each condition is evaluated separately. Genuinely inapplicable conditions are NA with a precise reason; applicable checks that cannot complete remain INCONCLUSIVE.
+Internal placement alone is never proof of Layer-2 access, wireless, egress visibility, asset inventory, credentials, or special permissions. Each condition is evaluated separately. Genuinely inapplicable conditions are NA with a precise reason; applicable checks that cannot complete remain operationally incomplete and prevent full certification.
 
 ## Result classifications
 
 - FOUND — a precise positive condition was proven by complete, validated evidence.
 - NOT_FOUND — a precise negative condition was proven by a successful complete check.
 - NA — the condition is genuinely inapplicable for the selected scope and capabilities.
-- INCONCLUSIVE — evidence is incomplete, blocked, ambiguous, failed, timed out, filtered, or insufficient.
+- Incomplete coverage — an operational state used when evidence is incomplete, blocked, ambiguous, failed, timed out, filtered, or insufficient. It is not a client-facing security verdict and is shown separately from the three finalized verdicts.
 
 An open port is not automatically a vulnerability. UDP silence is not automatically a closed port. A banner is not automatically a confirmed CVE. LLM text is never a classification authority.
 
@@ -117,25 +117,28 @@ Testcase_Name/
     ├── FOUND/
     │   └── Finding_Name/
     │       └── poc_001.png
-    └── NOT_FOUND/
-        └── Condition_Name/
+    ├── NOT_FOUND/
+    │   └── Condition_Name/
+    │       └── poc_001.png
+    └── NA/
+        └── Applicability_Reason/
             └── poc_001.png
 ~~~
 
-The category folders are created for every testcase. Condition folders and PNGs are created only when a matching classification has valid evidence. Each PNG contains only the actual executed command and its actual stdout/stderr. Exit codes, argv, timestamps, hashes, provenance, and explanatory metadata remain outside the PNG.
+The category folders are created for every testcase. FOUND and NOT_FOUND require validated evidence POCs; finalized NA results receive a PNG when the original discovery or a real stored applicability probe provides evidence. No synthetic POC is created when those facts are unavailable. Each PNG contains only the actual executed command and its actual stdout/stderr. Exit codes, argv, timestamps, hashes, provenance, and explanatory metadata remain outside the PNG.
 
 ## Reports
 
 Each completed assessment contains one row for each target × 40 testcases in testcase_results.csv, plus findings.csv, tool_status.csv, llm_triage.csv, assessment_summary.txt, assessment.json, logs, raw command evidence, hashes, manifests, POC folders, and a verified ZIP archive. The GUI exposes only files that exist for the selected assessment.
 
-The results screen is organized by target. A target's table remains in testcase order from 01 through 40; unresolved coverage is shown separately from the certified FOUND, NOT_FOUND, and NA verdicts. Every finalized description is exactly two client-facing lines and excludes target identifiers, tool names, AI references, and internal execution terms. View POC opens the target-owned PNG, Download POC downloads its original bytes, and Copy POC writes the PNG as `image/png` when the browser grants clipboard permission. Copy Description writes only the two displayed explanation lines, including for NA results.
+The results screen is organized by target. A target's table remains in testcase order from 01 through 40; incomplete coverage is shown separately from the certified FOUND, NOT_FOUND, and NA verdicts. Every finalized description is exactly two client-facing lines and excludes target identifiers, tool names, AI references, and internal execution terms. View POC opens the target-owned PNG, Download POC downloads its original bytes, and Copy POC writes the PNG as `image/png` when the browser grants clipboard permission. Copy Description writes only the two displayed explanation lines, including for NA results. Historical assessments can use **Re-adjudicate preserved evidence** to apply the current policy without rescanning or changing immutable raw evidence.
 
 ## Troubleshooting
 
 - Python or venv missing: install Python 3.11+ and its venv package, then rerun ./install.sh.
 - Scanner missing: rerun with SCOPEGUARD_INSTALL_SYSTEM_PACKAGES=1 ./install.sh after reviewing the package list, or install nmap, openssl, curl, dig, and zstd manually.
 - Ollama unavailable: run without AI; use Settings → Local AI for the exact status. Low RAM and WSL memory limits can prevent model loading.
-- WSL networking: WSL may not provide wireless, Layer-2, ICMP, or privileged scan capabilities. ScopeGuard records these as NA or INCONCLUSIVE instead of guessing.
+- WSL networking: WSL may not provide wireless, Layer-2, ICMP, or privileged scan capabilities. ScopeGuard records genuine non-applicability as NA and leaves applicable incomplete checks operationally incomplete instead of guessing.
 - Port conflict: stop the existing ScopeGuard process or run ./start.sh --port 8001.
 - Startup failure: inspect data/logs/application.log and data/logs/ollama.log; do not delete assessment data while troubleshooting.
 - Browser issue: use the local URL in a supported browser. Playwright’s root-only fallback is limited to controlled test automation and does not change application scanner security.
@@ -163,4 +166,4 @@ See CONTRIBUTING.md, AGENTS.md, and skills/scopeguard-qa/SKILL.md. Changes affec
 
 ## License
 
-No license has been selected for this private beta. All rights are reserved unless the repository owner adds a license.
+No license has been selected for this beta release. All rights are reserved unless the repository owner adds a license.

@@ -3,7 +3,11 @@ from pathlib import Path
 
 from app.classifier import classify
 from app.commands import run_command
-from app.evidence import png_has_text_metadata, write_testcase_evidence
+from app.evidence import (
+    png_has_text_metadata,
+    write_applicability_evidence,
+    write_testcase_evidence,
+)
 from app.registry import TESTCASE_BY_ID
 
 
@@ -35,3 +39,29 @@ def test_evidence_preserves_raw_output_and_exact_poc_layout(tmp_path: Path):
     assert payload.read_text(encoding="utf-8").startswith(command.displayed_command + "\n\n")
     assert "STATUS=" not in payload.read_text(encoding="utf-8")
     assert "FOUND" in json.loads((testcase_dir / "result.json").read_text()) ["status"]
+
+
+def test_na_applicability_evidence_has_real_command_output_poc(tmp_path: Path):
+    command = run_command(
+        ["python", "-m", "app.fixture_command", "--testcase-id", "10", "--scenario", "na", "--target", "fixture://na"],
+        timeout_seconds=3,
+        cwd=Path.cwd(),
+    )
+    artifact = write_applicability_evidence(
+        tmp_path,
+        "target-001_fixture_na",
+        TESTCASE_BY_ID["10"],
+        target_value="fixture://na",
+        target_id="target-001",
+        state="NA",
+        reason="Recorded external scope cannot reach the service.",
+        description_line_1="The service requires an internal testing position.",
+        description_line_2="The required position is not available for this assessment.",
+        command_result=command,
+        poc_condition="Scope_Applicability_Observation",
+    )
+    assert len(artifact["poc_paths"]) == 1
+    png = Path(tmp_path, artifact["poc_paths"][0])
+    assert png.exists()
+    assert not png_has_text_metadata(png)
+    assert png.with_name("payload.txt").read_text(encoding="utf-8").startswith(command.displayed_command + "\n\n")

@@ -182,6 +182,19 @@ class Database:
             outcome TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS adjudication_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+            result_id INTEGER NOT NULL REFERENCES results(id) ON DELETE CASCADE,
+            policy_version TEXT NOT NULL,
+            previous_status TEXT NOT NULL,
+            previous_verdict TEXT,
+            new_status TEXT NOT NULL,
+            new_verdict TEXT,
+            reason TEXT NOT NULL,
+            evidence_paths_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_events_assessment ON events(assessment_id, id);
         CREATE INDEX IF NOT EXISTS idx_results_assessment ON results(assessment_id, target_id, testcase_id);
         """
@@ -414,6 +427,56 @@ class Database:
                 fields,
             )
             return int(cursor.lastrowid)
+
+    def update_result(self, result_id: int, **fields: Any) -> None:
+        allowed = {
+            "status", "final_verdict", "coverage_status", "coverage_reason",
+            "observation_type", "reportable_finding", "description_line_1",
+            "description_line_2", "applicability", "conditions_tested_json",
+            "conditions_confirmed_json", "conditions_not_found_json",
+            "inconclusive_conditions_json", "severity", "finding_ids_json",
+            "evidence_paths_json", "poc_paths_json", "tools_used_json",
+            "validation_state", "failure_reason", "evidence_id", "command",
+            "output_preview",
+        }
+        invalid = set(fields) - allowed
+        if invalid:
+            raise ValueError(f"Unknown result fields: {sorted(invalid)}")
+        if not fields:
+            return
+        encoded = {
+            key: _json(value) if key.endswith("_json") else value
+            for key, value in fields.items()
+        }
+        assignments = ", ".join(f"{key}=?" for key in encoded)
+        with self._lock, self.connect() as connection:
+            connection.execute(
+                f"UPDATE results SET {assignments} WHERE id=?",
+                [*encoded.values(), result_id],
+            )
+
+    def add_adjudication_revision(self, revision: dict[str, Any]) -> int:
+        with self._lock, self.connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO adjudication_revisions
+                (assessment_id,result_id,policy_version,previous_status,previous_verdict,
+                 new_status,new_verdict,reason,evidence_paths_json,created_at)
+                VALUES (:assessment_id,:result_id,:policy_version,:previous_status,:previous_verdict,
+                        :new_status,:new_verdict,:reason,:evidence_paths_json,:created_at)""",
+                {
+                    **revision,
+                    "evidence_paths_json": _json(revision.get("evidence_paths_json", [])),
+                },
+            )
+            return int(cursor.lastrowid)
+
+    def list_adjudication_revisions(self, assessment_id: str) -> list[dict[str, Any]]:
+        with self._lock, self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM adjudication_revisions WHERE assessment_id=? ORDER BY id",
+                (assessment_id,),
+            ).fetchall()
+            return [_decode(row, ("evidence_paths_json",)) for row in rows]
 
     def list_results(self, assessment_id: str, target_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock, self.connect() as connection:

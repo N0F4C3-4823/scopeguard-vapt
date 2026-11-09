@@ -14,5 +14,7 @@
 - Enforced client-safe two-line descriptions without target identifiers, tool names, AI references, or internal execution terminology; added capped progressive timeout recovery with changed-command and no-loop safeguards.
 - Made complete installation fail closed unless Ollama, `qwen2.5:1.5b-instruct`, raw inference, and ScopeGuard structured AI self-test all pass; added explicit limited-mode installation and real timeout-retry schema guidance for Qwen.
 - Configured project-managed Ollama startup for documented CPU execution, 2048-token context, one model, one request, bounded queueing, and disabled cloud features; CPU library selection falls back to the portable library when AVX2 is unavailable.
+- Added build diagnostics and a versioned external-accessibility classification policy: confirmed filtered TCP endpoints can become evidence-backed NA without rescanning, UDP `open|filtered` remains explicitly ambiguous, and incomplete checks remain separate operational coverage states.
+- Added safe historical evidence re-adjudication, genuine NA applicability POCs (including scope-only probes), and preserved target-owned command/output provenance for CSV, JSON, and ZIP exports.
 
 Controlled validation remains distinct from exhaustive external vulnerability validation. See the capability matrices under docs/.

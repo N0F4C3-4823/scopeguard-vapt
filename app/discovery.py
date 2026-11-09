@@ -195,13 +195,20 @@ _TCP_FILTER_BLOCK = {
 }
 
 
-def service_gate(testcase_id: str, snapshot: DiscoverySnapshot) -> tuple[str, str] | None:
+def service_gate(
+    testcase_id: str,
+    snapshot: DiscoverySnapshot,
+    *,
+    assessment_type: str = "external_unauthenticated",
+) -> tuple[str, str] | None:
     """Return an applicability/coverage override from complete discovery.
 
-    Explicitly closed required ports are NA.  When every required TCP port is
-    filtered, the application-layer condition is blocked from this vantage
-    point, so it is INCONCLUSIVE rather than being probed repeatedly.  Missing,
-    failed, or timed-out observations never become NA.
+    Explicitly closed required ports are NA.  For an external unauthenticated
+    assessment, a complete scan that positively reports every required TCP
+    endpoint as ``filtered`` establishes an accessibility limitation and is
+    therefore NA under the external-vantage policy.  It is not a negative
+    security result.  Missing, failed, or timed-out observations never become
+    NA.
     """
     if testcase_id in _GENERIC_TCP:
         if not snapshot.tcp_complete:
@@ -221,12 +228,16 @@ def service_gate(testcase_id: str, snapshot: DiscoverySnapshot) -> tuple[str, st
         if all(observations[port].state == "closed" for port in required_tcp):
             return "NA", f"The complete TCP discovery scan explicitly closed the required service ports: {', '.join(map(str, required_tcp))}"
         if testcase_id in _TCP_FILTER_BLOCK and all(
-            observations[port].state in {"filtered", "open|filtered"} for port in required_tcp
+            observations[port].state == "filtered" for port in required_tcp
         ):
-            return (
-                "INCONCLUSIVE",
-                "The complete TCP discovery scan showed filtering on every required service port; the application-layer condition could not be tested from this vantage point",
+            reason = (
+                "NA_UNTESTABLE_FROM_EXTERNAL_VANTAGE: the complete TCP discovery scan observed "
+                f"all required service ports as filtered ({', '.join(map(str, required_tcp))}); "
+                "the service-dependent check could not be performed from this external position"
             )
+            if assessment_type == "external_unauthenticated":
+                return "NA", reason
+            return "INCONCLUSIVE", reason
         return None
     if required_udp:
         if not snapshot.udp_complete:
@@ -236,6 +247,37 @@ def service_gate(testcase_id: str, snapshot: DiscoverySnapshot) -> tuple[str, st
             return None
         if all(observations[port].state == "closed" for port in required_udp):
             return "NA", f"The complete UDP discovery scan explicitly closed the required service ports: {', '.join(map(str, required_udp))}"
+    return None
+
+
+def external_udp_accessibility_gate(
+    testcase_id: str,
+    snapshot: DiscoverySnapshot,
+    *,
+    assessment_type: str,
+) -> tuple[str, str] | None:
+    """Return an external accessibility NA only after the service check ran.
+
+    ``open|filtered`` is deliberately not treated as confirmed filtering.  The
+    caller must first attempt the protocol-specific check and bounded recovery;
+    this helper only supplies the final accessibility policy decision when the
+    completed discovery still contains no usable UDP response.
+    """
+    if assessment_type != "external_unauthenticated" or not snapshot.udp_complete:
+        return None
+    required_udp = _UDP_REQUIRED.get(testcase_id, ())
+    observations = {item.port: item for item in snapshot.udp}
+    if not required_udp or not all(port in observations for port in required_udp):
+        return None
+    if all(observations[port].state == "open|filtered" for port in required_udp) and all(
+        "no-response" in observations[port].service.casefold() for port in required_udp
+    ):
+        return (
+            "NA",
+            "NA_UNTESTABLE_FROM_EXTERNAL_VANTAGE: the completed UDP checks returned "
+            "open|filtered with no usable protocol response on every required endpoint; "
+            "the service-dependent check could not be assessed from this external position",
+        )
     return None
 
 

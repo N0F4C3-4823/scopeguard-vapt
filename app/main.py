@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 
 from .applicability import ASSESSMENT_TYPES
+from .build_info import APP_VERSION
+from .build_info import as_dict as build_info
 from .config import Settings, load_settings
 from .db import Database, now_iso
 from .exporter import ExportError, export_assessment, export_target, target_dir_name
@@ -45,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings.ensure_dirs()
     db = Database(active_settings.db_path)
     manager = AssessmentManager(db, active_settings)
-    app = FastAPI(title="ScopeGuard VAPT", version="1.0.0-beta.1")
+    app = FastAPI(title="ScopeGuard VAPT", version=APP_VERSION)
     app.state.settings = active_settings
     app.state.db = db
     app.state.manager = manager
@@ -64,7 +66,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "application": "ScopeGuard VAPT", "version": "1.0.0-beta.1"}
+        return {"status": "ok", "application": "ScopeGuard VAPT", **build_info()}
+
+    @app.get("/api/diagnostics")
+    async def diagnostics() -> dict[str, Any]:
+        active = [
+            item for item in db.list_assessments()
+            if item.get("status") in {"QUEUED", "RUNNING", "PAUSED"}
+        ]
+        return {
+            **build_info(),
+            "active_assessments": [item["id"] for item in active],
+            "classification_authority": "deterministic backend",
+            "final_verdicts": ["FOUND", "NOT_FOUND", "NA"],
+        }
 
     @app.get("/api/testcases")
     async def testcases() -> dict[str, Any]:
@@ -221,6 +236,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         return _serialize_assessment(db.get_assessment(assessment_id) or {})
+
+    @app.post("/api/assessments/{assessment_id}/re-adjudicate")
+    async def re_adjudicate(assessment_id: str) -> dict[str, Any]:
+        try:
+            return manager.re_adjudicate(assessment_id)
+        except ExportError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            status_code = 404 if str(error) == "Assessment not found" else 409
+            raise HTTPException(status_code=status_code, detail=str(error)) from error
 
     @app.post("/api/assessments/{assessment_id}/pause")
     async def pause_assessment(assessment_id: str) -> dict[str, Any]:

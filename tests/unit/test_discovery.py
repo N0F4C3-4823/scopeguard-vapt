@@ -9,6 +9,7 @@ from app.discovery import (
     DiscoverySnapshot,
     PortObservation,
     build_discovery_commands,
+    external_udp_accessibility_gate,
     parse_discovery_result,
     service_gate,
 )
@@ -83,7 +84,7 @@ def test_discovery_parser_preserves_protocol_and_requires_nmap_completion():
     assert "completion" in failure
 
 
-def test_service_gate_preserves_filtered_tcp_as_inconclusive():
+def test_service_gate_external_filtered_tcp_is_accessibility_na():
     closed = DiscoverySnapshot(
         target="127.0.0.1",
         tcp=(PortObservation(23, "tcp", "closed", "telnet"),),
@@ -104,11 +105,30 @@ def test_service_gate_preserves_filtered_tcp_as_inconclusive():
         udp_complete=False,
         host_state="HOST_INDETERMINATE",
     )
-    assert service_gate("10", filtered) == (
-        "INCONCLUSIVE",
-        "The complete TCP discovery scan showed filtering on every required service port; the application-layer condition could not be tested from this vantage point",
-    )
+    state, reason = service_gate("10", filtered)
+    assert state == "NA"
+    assert reason.startswith("NA_UNTESTABLE_FROM_EXTERNAL_VANTAGE:")
+    assert "TCP" in reason and "filtered" in reason
+    assert service_gate("10", filtered, assessment_type="internal_unauthenticated")[0] == "INCONCLUSIVE"
     assert service_gate("10", closed) is not None
+
+
+def test_udp_open_filtered_is_not_confirmed_filtering_until_protocol_check_finishes():
+    snapshot = DiscoverySnapshot(
+        target="127.0.0.1",
+        tcp=(),
+        udp=(PortObservation(123, "udp", "open|filtered", "ntp no-response"),),
+        tcp_complete=True,
+        udp_complete=True,
+        host_state="HOST_REACHABLE",
+    )
+    assert service_gate("01", snapshot) is None
+    state, reason = external_udp_accessibility_gate(
+        "01", snapshot, assessment_type="external_unauthenticated"
+    )
+    assert state == "NA"
+    assert "open|filtered" in reason
+    assert "filtered" not in reason.split("open|filtered", 1)[1]
 
 
 def test_actual_nmap_discovery_against_controlled_local_tcp_service(live_http_service):

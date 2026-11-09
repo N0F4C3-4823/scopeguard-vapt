@@ -96,8 +96,10 @@ def write_testcase_evidence(
     evidence_dir = testcase_dir / "evidence"
     found_dir = testcase_dir / "POCs" / "FOUND"
     not_found_dir = testcase_dir / "POCs" / "NOT_FOUND"
+    na_dir = testcase_dir / "POCs" / "NA"
     found_dir.mkdir(parents=True, exist_ok=True)
     not_found_dir.mkdir(parents=True, exist_ok=True)
+    na_dir.mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = evidence_dir / "stdout.txt"
     stderr_path = evidence_dir / "stderr.txt"
@@ -230,6 +232,8 @@ def write_applicability_evidence(
     description_line_1: str = "",
     description_line_2: str = "",
     related_evidence_paths: tuple[str, ...] = (),
+    command_result: CommandResult | None = None,
+    poc_condition: str = "Applicability_Observation",
 ) -> dict[str, Any]:
     testcase_dir = assessment_root / target_dir_name / "testcases" / (
         f"{testcase.id}_{safe_name(testcase.condition)}"
@@ -237,6 +241,7 @@ def write_applicability_evidence(
     evidence_dir = testcase_dir / "evidence"
     (testcase_dir / "POCs" / "FOUND").mkdir(parents=True, exist_ok=True)
     (testcase_dir / "POCs" / "NOT_FOUND").mkdir(parents=True, exist_ok=True)
+    (testcase_dir / "POCs" / "NA").mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for relative in related_evidence_paths:
         relative_path = Path(relative)
@@ -245,6 +250,56 @@ def write_applicability_evidence(
         path = assessment_root / relative_path
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"Missing related evidence path: {relative}")
+    evidence_paths: list[str] = []
+    poc_paths: list[str] = []
+    hashes: dict[str, str] = {}
+    command_payload: dict[str, object] = {
+        "command_executed": False,
+        "target_id": target_id,
+        "target": target_value,
+        "testcase_id": testcase.id,
+    }
+    if command_result is not None:
+        stdout_path = evidence_dir / "stdout.bin"
+        stderr_path = evidence_dir / "stderr.bin"
+        stdout_path.write_bytes(command_result.stdout)
+        stderr_path.write_bytes(command_result.stderr)
+        hashes = {
+            "stdout_sha256": sha256_bytes(command_result.stdout),
+            "stderr_sha256": sha256_bytes(command_result.stderr),
+            "combined_sha256": sha256_bytes(command_result.combined_output),
+        }
+        command_payload = {
+            "command_executed": True,
+            "command_id": command_result.id,
+            "argv": list(command_result.argv),
+            "displayed_command": command_result.displayed_command,
+            "cwd": command_result.cwd,
+            "started_at": command_result.started_at,
+            "ended_at": command_result.ended_at,
+            "exit_code": command_result.exit_code,
+            "timed_out": command_result.timed_out,
+            "tool_version": command_result.tool_version,
+            "execution_status": command_result.status,
+            **{key: value for key, value in hashes.items()},
+            "target_id": target_id,
+            "target": target_value,
+            "testcase_id": testcase.id,
+        }
+        (evidence_dir / "commands.json").write_text(json.dumps(command_payload, indent=2), encoding="utf-8")
+        (evidence_dir / "hashes.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
+        evidence_paths.extend(
+            str(path.relative_to(assessment_root))
+            for path in (stdout_path, stderr_path, evidence_dir / "commands.json", evidence_dir / "hashes.json")
+        )
+        if state == "NA":
+            pages = render_poc_pngs(
+                command_result.displayed_command,
+                command_result.stdout,
+                command_result.stderr,
+                testcase_dir / "POCs" / "NA" / safe_name(poc_condition),
+            )
+            poc_paths.extend(str(path.relative_to(assessment_root)) for path in pages)
     payload = {
         "testcase_id": testcase.id,
         "condition": testcase.condition,
@@ -259,8 +314,11 @@ def write_applicability_evidence(
         "missing": list(missing),
         "target_id": target_id,
         "target": target_value,
-        "command_executed": False,
+        **command_payload,
         "related_evidence_paths": list(related_evidence_paths),
+        "evidence_paths": evidence_paths + list(related_evidence_paths),
+        "poc_paths": poc_paths,
+        "hashes": hashes,
     }
     path = evidence_dir / "applicability.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -271,9 +329,13 @@ def write_applicability_evidence(
     )
     return {
         "root": testcase_dir,
-        "evidence_paths": [str(path.relative_to(assessment_root))] + list(related_evidence_paths),
-        "poc_paths": [],
-        "hashes": {"applicability_sha256": sha256_bytes(path.read_bytes())},
-        "commands": payload,
-        "stdout_preview": reason,
+        "evidence_paths": [str(path.relative_to(assessment_root))] + evidence_paths + list(related_evidence_paths),
+        "poc_paths": poc_paths,
+        "hashes": {"applicability_sha256": sha256_bytes(path.read_bytes()), **hashes},
+        "commands": command_payload,
+        "stdout_preview": (
+            command_result.stdout.decode("utf-8", errors="replace")[:1200]
+            if command_result is not None
+            else reason
+        ),
     }

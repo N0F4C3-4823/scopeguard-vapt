@@ -73,6 +73,56 @@ def test_discrepancy_invokes_ollama_and_accepts_only_bounded_recovery(manager, m
     assert audits[0]["outcome"] == "RECOVERY_SUCCEEDED"
 
 
+def test_timeout_model_json_retry_uses_typed_facts_before_deterministic_fallback(manager, monkeypatch):
+    testcase = TESTCASE_BY_ID["02"]
+    initial = _result(status="TIMEOUT", timed_out=True)
+    classification = Classification(
+        "INCONCLUSIVE", "applicable", (testcase.condition,), (), (), (testcase.condition,),
+        "unknown", "bounded command timeout", (), "INCOMPLETE",
+        final_verdict=None, coverage_status="FAILED", coverage_reason="bounded command timeout",
+    )
+    calls: list[str] = []
+
+    def triage(**_kwargs):
+        calls.append("triage")
+        if len(calls) == 1:
+            raise ValueError("malformed structured model response")
+        return TriageModel(
+            testcase_id="02",
+            observation_ids=[],
+            interpretation="The typed timeout facts support one bounded retry.",
+            suggested_action_id="retry_safe_probe",
+            parameters={"timeout_profile": "protocol_retry"},
+            explanation="Retry the registered probe with the approved timeout profile.",
+        )
+
+    monkeypatch.setattr(manager.ollama, "triage", triage)
+    monkeypatch.setattr(manager.db, "add_event", lambda *args, **kwargs: 1)
+    recovered = _result(
+        status="COMPLETED",
+        stdout=(
+            b"Nmap scan report for 127.0.0.1\n"
+            b"80/tcp open http nginx\n"
+            b"Nmap done: 1 IP address (1 host up) scanned in 0.01 seconds\n"
+        ),
+    )
+    monkeypatch.setattr(manager, "_run_argv", lambda *_args, **_kwargs: recovered)
+    command, final, attempts, audits = manager._resolve_discrepancy(
+        {"id": "assessment-test", "llm_enabled": 1},
+        {"id": "target-test", "value": "127.0.0.1", "label": "loopback", "kind": "live", "host_count": 1},
+        testcase,
+        initial,
+        classification,
+        threading.Event(),
+    )
+
+    assert calls == ["triage", "triage"]
+    assert command is recovered
+    assert final.final_verdict == "FOUND"
+    assert len(attempts) == 2
+    assert audits[0]["action_id"] == "retry_safe_probe"
+
+
 def test_recovery_registry_rejects_arbitrary_actions(settings):
     plan = plan_recovery(
         action_id="run_shell_command",

@@ -50,11 +50,11 @@ async def test_scopeguard_gui_fixture_lifecycle_and_exports():
         await page.locator("#result-status").select_option("FOUND")
         assert await page.locator("#results-table tbody tr").count() > 0
         await page.locator("#result-status").select_option("all")
-        await page.locator("a[data-preview]").first.click()
+        await page.locator("button[data-preview]").first.click()
         await page.locator(".preview-image").wait_for()
         await page.locator(".modal-close").click()
         async with page.expect_download() as download_info:
-            await page.get_by_role("link", name="Testcase CSV").click()
+            await page.get_by_role("link", name="Target CSV").click()
         csv_download = await download_info.value
         csv_path = Path(tempfile.gettempdir()) / "scopeguard-e2e.csv"
         await csv_download.save_as(csv_path)

@@ -134,8 +134,14 @@ def _validate_finalized_artifacts(assessment_root: Path, results: list[dict[str,
                 path = assessment_root / relative
                 if path.suffix.lower() != ".png" or path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
                     raise ExportError(f"Export refused: invalid POC artifact {relative}")
-        elif verdict == "NA" and pocs:
-            raise ExportError(f"Export refused: NA result {result['target_id']}/{result['testcase_id']} has a POC")
+        elif verdict == "NA":
+            # NA is an accessibility/applicability verdict, but it still
+            # requires a genuine command/output POC when the applicability
+            # decision was supported by recorded evidence.
+            for relative in pocs:
+                path = assessment_root / relative
+                if path.suffix.lower() != ".png" or path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+                    raise ExportError(f"Export refused: invalid NA POC artifact {relative}")
         if verdict in {"FOUND", "NOT_FOUND", "NA"}:
             line_1, line_2 = _description(result)
             target_identifiers = tuple(

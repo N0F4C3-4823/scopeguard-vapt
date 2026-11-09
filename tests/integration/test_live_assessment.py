@@ -56,6 +56,21 @@ def test_authorized_local_target_runs_production_live_adapter_path(manager, data
         if not execution["testcase_id"].startswith("DISCOVERY_")
     ]
     assert len(discovery_executions) == 2
-    assert len(adapter_executions) == sum(1 for row in results if row["command"] is not None)
+    # A filtered/externally inaccessible result may use the immutable shared
+    # discovery command as its applicability POC.  That is deliberate evidence
+    # reuse, not a second network execution for every testcase.  Count only
+    # result commands that are not one of the two shared discovery commands
+    # when checking subprocess provenance.
+    discovery_commands = {row["displayed_command"] for row in discovery_executions}
+    adapter_result_rows = [
+        row for row in results
+        if row["command"] is not None and row["command"] not in discovery_commands
+    ]
+    assert len(adapter_executions) == len(adapter_result_rows)
+    assert {row["command"] for row in adapter_result_rows} >= {
+        execution["displayed_command"]
+        for execution in adapter_executions
+        if execution["testcase_id"] not in {"DISCOVERY_TCP", "DISCOVERY_UDP"}
+    }
     assert manager.executed_commands == len(discovery_executions) + len(adapter_executions)
     print(f"LIVE_PERFORMANCE elapsed_seconds={elapsed:.2f} peak_rss_mb={peak_rss_mb:.1f} max_active_commands={manager.max_active_commands} executed_commands={manager.executed_commands}")

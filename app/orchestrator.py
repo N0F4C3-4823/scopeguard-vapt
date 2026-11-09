@@ -7,17 +7,22 @@ import threading
 import time
 import uuid
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 from .applicability import ASSESSMENT_TYPES, evaluate_applicability, snapshot_for
+from .build_info import CLASSIFICATION_POLICY_VERSION
 from .commands import CommandResult, run_command, sha256_bytes
 from .config import Settings
 from .db import Database, now_iso
 from .descriptions import two_line_description
 from .discovery import (
     DiscoverySnapshot,
+    PortObservation,
     build_discovery_commands,
+    external_udp_accessibility_gate,
     parse_discovery_result,
+    protocol_for_testcase,
     service_gate,
 )
 from .evidence import safe_name, write_applicability_evidence, write_testcase_evidence
@@ -446,6 +451,357 @@ class AssessmentManager:
         )
         return snapshot
 
+    def _recorded_discovery_result(
+        self,
+        assessment_root,
+        target: dict,
+        protocol: str,
+    ) -> CommandResult | None:
+        """Rehydrate a completed discovery command without probing the target again."""
+        directory = assessment_root / self._target_dir_name(target) / "discovery" / protocol
+        commands_path = directory / "commands.json"
+        stdout_path = directory / "stdout.bin"
+        stderr_path = directory / "stderr.bin"
+        if any(path.is_symlink() or not path.is_file() for path in (commands_path, stdout_path, stderr_path)):
+            return None
+        try:
+            record = json.loads(commands_path.read_text(encoding="utf-8"))
+            argv = tuple(str(item) for item in record["argv"])
+            if not argv or record.get("protocol") != protocol:
+                return None
+            return CommandResult(
+                id=str(record["command_id"]),
+                argv=argv,
+                displayed_command=str(record["displayed_command"]),
+                cwd=str(record.get("cwd") or self.settings.root_dir),
+                started_at=str(record.get("started_at") or ""),
+                ended_at=str(record.get("ended_at") or ""),
+                exit_code=record.get("exit_code"),
+                timed_out=bool(record.get("timed_out")),
+                stdout=stdout_path.read_bytes(),
+                stderr=stderr_path.read_bytes(),
+                status=str(record.get("execution_status") or "FAILED"),
+                tool_version=str(record.get("tool_version") or "unknown"),
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    def _recorded_execution_result(
+        self,
+        assessment_root: Path,
+        execution: dict,
+    ) -> CommandResult | None:
+        """Rehydrate an existing execution without contacting its target."""
+        try:
+            command_path = assessment_root / str(execution["stdout_path"])
+            stderr_path = assessment_root / str(execution["stderr_path"])
+            if (
+                command_path.is_symlink()
+                or stderr_path.is_symlink()
+                or not command_path.is_file()
+                or not stderr_path.is_file()
+                or not command_path.resolve().is_relative_to(assessment_root.resolve())
+                or not stderr_path.resolve().is_relative_to(assessment_root.resolve())
+            ):
+                return None
+            argv = tuple(str(item) for item in json.loads(execution["command_json"] or "[]"))
+            if not argv:
+                return None
+            return CommandResult(
+                id=str(execution["id"]),
+                argv=argv,
+                displayed_command=str(execution["displayed_command"]),
+                cwd=str(execution.get("cwd") or self.settings.root_dir),
+                started_at=str(execution.get("started_at") or ""),
+                ended_at=str(execution.get("ended_at") or ""),
+                exit_code=execution.get("exit_code"),
+                timed_out=bool(execution.get("timed_out")),
+                stdout=command_path.read_bytes(),
+                stderr=stderr_path.read_bytes(),
+                status=str(execution.get("execution_status") or "FAILED"),
+                tool_version=str(execution.get("tool_version") or "unknown"),
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    def _run_applicability_probe(self, assessment_root, assessment: dict, testcase) -> CommandResult:
+        authorization_file = assessment_root / "authorization.json"
+        argv = [
+            sys.executable,
+            "-m",
+            "app.applicability_probe",
+            "--authorization-file",
+            str(authorization_file),
+            "--testcase-id",
+            testcase.id,
+        ]
+        return self._run_argv(argv, max(5.0, float(self.settings.tcp_connect_timeout_seconds)))
+
+    @staticmethod
+    def _snapshot_from_disk(assessment_root, target: dict) -> DiscoverySnapshot | None:
+        path = assessment_root / f"{target['id']}_{safe_name(target['label'])[:80]}" / "discovery" / "discovery.json"
+        if path.is_symlink() or not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            def convert(item):
+                return PortObservation(
+                    int(item["port"]),
+                    str(item["protocol"]),
+                    str(item["state"]),
+                    str(item.get("service") or ""),
+                    str(item.get("scanner") or "nmap"),
+                )
+            return DiscoverySnapshot(
+                target=str(payload["target"]),
+                tcp=tuple(convert(item) for item in payload.get("tcp", [])),
+                udp=tuple(convert(item) for item in payload.get("udp", [])),
+                tcp_complete=bool(payload.get("tcp_complete")),
+                udp_complete=bool(payload.get("udp_complete")),
+                host_state=str(payload.get("host_state") or "HOST_INDETERMINATE"),
+                tcp_command_id=payload.get("tcp_command_id"),
+                udp_command_id=payload.get("udp_command_id"),
+                tcp_failure=payload.get("tcp_failure"),
+                udp_failure=payload.get("udp_failure"),
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    def re_adjudicate(self, assessment_id: str) -> dict[str, object]:
+        """Apply the current policy to immutable evidence without rescanning targets."""
+        assessment = self.db.get_assessment(assessment_id)
+        if not assessment:
+            raise ValueError("Assessment not found")
+        if assessment.get("status") in {"QUEUED", "RUNNING", "PAUSED"}:
+            raise ValueError("Stop or cancel the assessment before re-adjudicating it")
+        targets = self.db.get_targets(assessment_id)
+        assessment_root = self.settings.data_dir / "assessments" / assessment_id
+        results = self.db.list_results(assessment_id)
+        by_target = {target["id"]: target for target in targets}
+        changed = 0
+        generated_pocs = 0
+        remaining = 0
+        for result in results:
+            target = by_target.get(result["target_id"])
+            testcase = next((item for item in TESTCASES if item.id == result["testcase_id"]), None)
+            if target is None or testcase is None:
+                remaining += 1
+                continue
+            snapshot = self._snapshot_from_disk(assessment_root, target)
+            capabilities = snapshot_for(
+                requested=assessment["capabilities_json"],
+                permissions=assessment["permissions_json"],
+                credentials_available=bool(assessment["credentials_available"]),
+                controlled_fixture=target["kind"] == "fixture",
+            )
+            decision = evaluate_applicability(testcase, assessment["assessment_type"], capabilities)
+            gate = None
+            if decision.state == "APPLICABLE" and snapshot is not None and target["kind"] != "fixture":
+                gate = service_gate(testcase.id, snapshot, assessment_type=assessment["assessment_type"])
+                if gate is None and not result.get("final_verdict"):
+                    gate = external_udp_accessibility_gate(
+                        testcase.id,
+                        snapshot,
+                        assessment_type=assessment["assessment_type"],
+                    )
+                if gate:
+                    decision = replace(decision, state=gate[0], reason=gate[1], missing=())
+            desired_na = decision.state == "NA"
+            existing_verdict = result.get("final_verdict")
+            if existing_verdict in {"FOUND", "NOT_FOUND"}:
+                continue
+            existing_na = existing_verdict == "NA"
+            existing_na_without_poc = existing_na and not result.get("poc_paths_json")
+            if not desired_na and not existing_na:
+                if not existing_verdict:
+                    remaining += 1
+                continue
+            if existing_na_without_poc:
+                # Preserve the historical NA decision, but allow the current
+                # evidence pipeline to add a genuine POC.  This is evidence
+                # repair only; it never upgrades or downgrades the verdict.
+                decision = replace(
+                    decision,
+                    state="NA",
+                    reason=str(result.get("coverage_reason") or result.get("applicability") or "Historical applicability decision"),
+                    missing=(),
+                )
+            if result.get("poc_paths_json"):
+                if existing_verdict == "NA":
+                    line_1, line_2 = two_line_description(
+                        testcase_id=testcase.id,
+                        testcase_name=testcase.name,
+                        condition=testcase.condition,
+                        verdict="NA",
+                        observation_type="coverage",
+                        target=target["label"] or target["value"],
+                        applicability=str(result.get("applicability") or result.get("coverage_reason") or ""),
+                    )
+                    if (line_1, line_2) != (result.get("description_line_1"), result.get("description_line_2")):
+                        self.db.update_result(
+                            int(result["id"]),
+                            description_line_1=line_1,
+                            description_line_2=line_2,
+                        )
+                continue
+            command_result = None
+            is_recorded_execution = False
+            poc_condition = "Scope_Applicability_Observation"
+            if gate and snapshot is not None:
+                protocol = protocol_for_testcase(testcase.id)
+                command_result = self._recorded_discovery_result(assessment_root, target, protocol) if protocol in {"tcp", "udp"} else None
+                if command_result is not None:
+                    poc_condition = "TCP_Filtered_External_Vantage" if protocol == "tcp" else "UDP_Accessibility_Observation"
+            if command_result is None:
+                if existing_na_without_poc:
+                    execution = next(
+                        (
+                            item
+                            for item in self.db.list_executions(assessment_id)
+                            if item["target_id"] == target["id"]
+                            and item["testcase_id"] == testcase.id
+                            and not item["testcase_id"].startswith("DISCOVERY_")
+                        ),
+                        None,
+                    )
+                    if execution is not None:
+                        command_result = self._recorded_execution_result(assessment_root, execution)
+                        if command_result is not None:
+                            is_recorded_execution = True
+                            poc_condition = "Applicability_Observation"
+                if command_result is None:
+                    command_result = self._run_applicability_probe(assessment_root, assessment, testcase)
+            line_1, line_2 = two_line_description(
+                testcase_id=testcase.id,
+                testcase_name=testcase.name,
+                condition=testcase.condition,
+                verdict="NA",
+                observation_type="coverage",
+                target=target["label"] or target["value"],
+                applicability=decision.reason,
+            )
+            artifact = write_applicability_evidence(
+                assessment_root,
+                self._target_dir_name(target),
+                testcase,
+                target_value=target["value"],
+                target_id=target["id"],
+                state="NA",
+                reason=decision.reason,
+                description_line_1=line_1,
+                description_line_2=line_2,
+                command_result=command_result,
+                poc_condition=poc_condition,
+            )
+            if not artifact["poc_paths"]:
+                remaining += 1
+                continue
+            protocol = protocol_for_testcase(testcase.id)
+            is_recorded_discovery = bool(gate and snapshot is not None and protocol in {"tcp", "udp"})
+            if not is_recorded_discovery and not is_recorded_execution:
+                self.db.add_execution({
+                    "id": command_result.id,
+                    "assessment_id": assessment_id,
+                    "target_id": target["id"],
+                    "testcase_id": testcase.id,
+                    "command_json": json.dumps(list(command_result.argv)),
+                    "displayed_command": command_result.displayed_command,
+                    "cwd": command_result.cwd,
+                    "started_at": command_result.started_at,
+                    "ended_at": command_result.ended_at,
+                    "exit_code": command_result.exit_code,
+                    "timed_out": int(command_result.timed_out),
+                    "tool_version": command_result.tool_version,
+                    "stdout_path": artifact["evidence_paths"][0],
+                    "stderr_path": artifact["evidence_paths"][1],
+                    "stdout_sha256": command_result.stdout_sha256,
+                    "stderr_sha256": command_result.stderr_sha256,
+                    "combined_sha256": command_result.combined_sha256,
+                    "execution_status": command_result.status,
+                })
+            previous_paths = list(result.get("evidence_paths_json") or [])
+            evidence_paths = list(dict.fromkeys(previous_paths + artifact["evidence_paths"]))
+            self.db.update_result(
+                int(result["id"]),
+                status="NA",
+                final_verdict="NA",
+                coverage_status="COMPLETED",
+                coverage_reason=decision.reason,
+                observation_type="coverage",
+                reportable_finding=0,
+                description_line_1=line_1,
+                description_line_2=line_2,
+                applicability=decision.reason,
+                conditions_tested_json=[testcase.condition],
+                conditions_confirmed_json=[],
+                conditions_not_found_json=[],
+                inconclusive_conditions_json=[],
+                severity="informational",
+                finding_ids_json=[],
+                evidence_paths_json=evidence_paths,
+                poc_paths_json=artifact["poc_paths"],
+                tools_used_json=list(dict.fromkeys(list(result.get("tools_used_json") or []) + [command_result.argv[0]])),
+                validation_state="RE_ADJUDICATED",
+                failure_reason=None,
+                evidence_id=f"evidence-{command_result.id}",
+                command=command_result.displayed_command,
+                output_preview=artifact["stdout_preview"],
+            )
+            self.db.add_adjudication_revision({
+                "assessment_id": assessment_id,
+                "result_id": int(result["id"]),
+                "policy_version": CLASSIFICATION_POLICY_VERSION,
+                "previous_status": str(result["status"]),
+                "previous_verdict": result.get("final_verdict"),
+                "new_status": "NA",
+                "new_verdict": "NA",
+                "reason": decision.reason,
+                "evidence_paths_json": artifact["evidence_paths"] + artifact["poc_paths"],
+                "created_at": now_iso(),
+            })
+            for relative in artifact["evidence_paths"] + artifact["poc_paths"]:
+                path = assessment_root / relative
+                self.db.add_evidence({
+                    "id": f"re-adjudication-{result['id']}-{sha256_bytes(relative.encode())[:12]}",
+                    "result_id": int(result["id"]),
+                    "assessment_id": assessment_id,
+                    "target_id": target["id"],
+                    "testcase_id": testcase.id,
+                    "artifact_path": relative,
+                    "kind": path.suffix.lstrip(".") or "file",
+                    "sha256": sha256_bytes(path.read_bytes()),
+                    "provenance": artifact["commands"],
+                })
+            changed += 1
+            generated_pocs += len(artifact["poc_paths"])
+        updated = self.db.list_results(assessment_id)
+        counts = {status: sum(item["status"] == status for item in updated) for status in ("FOUND", "NOT_FOUND", "NA", "INCONCLUSIVE")}
+        self.db.update_assessment(
+            assessment_id,
+            found_count=counts["FOUND"],
+            not_found_count=counts["NOT_FOUND"],
+            na_count=counts["NA"],
+            inconclusive_count=counts["INCONCLUSIVE"],
+            error_count=sum(1 for item in updated if item.get("coverage_status") in {"FAILED", "BLOCKED", "INSUFFICIENT_EVIDENCE"}),
+        )
+        self.db.add_event(
+            assessment_id,
+            "assessment_re_adjudicated",
+            "Evidence Verification",
+            f"Applied {CLASSIFICATION_POLICY_VERSION} to preserved evidence without rescanning targets.",
+            status="COMPLETED_WITH_LIMITATIONS" if any(not item.get("final_verdict") for item in updated) else "COMPLETED",
+            payload={"changed": changed, "generated_pocs": generated_pocs, "remaining_incomplete": sum(1 for item in updated if not item.get("final_verdict"))},
+        )
+        export_assessment(self.db, assessment_id, self.settings.data_dir, status_override=assessment.get("status"))
+        return {
+            "assessment_id": assessment_id,
+            "policy_version": CLASSIFICATION_POLICY_VERSION,
+            "changed": changed,
+            "generated_pocs": generated_pocs,
+            "remaining_incomplete": sum(1 for item in updated if not item.get("final_verdict")),
+            "counts": counts,
+        }
+
     def _run(self, assessment_id: str, cancel: threading.Event, pause: threading.Event) -> None:
         assessment = self.db.get_assessment(assessment_id)
         if not assessment:
@@ -508,6 +864,7 @@ class AssessmentManager:
                         controlled_fixture=target["kind"] == "fixture",
                     )
                     decision = evaluate_applicability(testcase, assessment["assessment_type"], capabilities)
+                    gate = None
                     related_evidence_paths: tuple[str, ...] = ()
                     if decision.state == "APPLICABLE" and target["kind"] != "fixture":
                         if testcase.id == "29" and target["kind"] == "ip" and ":" not in target["value"]:
@@ -517,7 +874,15 @@ class AssessmentManager:
                                 reason="IPv6 exposure testing requires an authorized IPv6 endpoint; the approved target is an IPv4 literal.",
                                 missing=(),
                             )
-                        gate = service_gate(testcase.id, discovery.get(target["id"])) if target["id"] in discovery else None
+                        gate = (
+                            service_gate(
+                                testcase.id,
+                                discovery[target["id"]],
+                                assessment_type=assessment["assessment_type"],
+                            )
+                            if target["id"] in discovery
+                            else None
+                        )
                         if gate and gate[0] in {"NA", "INCONCLUSIVE"}:
                             decision = replace(decision, state=gate[0], reason=gate[1], missing=())
                             discovery_root = assessment_root / self._target_dir_name(target) / "discovery"
@@ -527,6 +892,35 @@ class AssessmentManager:
                                 if path.is_file() and not path.is_symlink()
                             )
                     command_result: CommandResult | None = None
+                    applicability_command_result: CommandResult | None = None
+                    applicability_command_is_new = False
+                    applicability_poc_condition = "Applicability_Observation"
+                    if decision.state == "NA" and target["kind"] != "fixture":
+                        # Prefer the completed discovery command that proved a
+                        # filtered/closed service or UDP accessibility limit.
+                        if target["id"] in discovery and gate and gate[0] == "NA":
+                            protocol = protocol_for_testcase(testcase.id)
+                            if protocol in {"tcp", "udp"}:
+                                applicability_command_result = self._recorded_discovery_result(
+                                    assessment_root, target, protocol
+                                )
+                                if applicability_command_result is not None:
+                                    applicability_poc_condition = (
+                                        "TCP_Filtered_External_Vantage"
+                                        if protocol == "tcp" and "filtered" in decision.reason.casefold()
+                                        else "TCP_Accessibility_Observation"
+                                        if protocol == "tcp"
+                                        else "UDP_Accessibility_Observation"
+                                    )
+                        # Profile/capability NA has no network command.  Run a
+                        # read-only probe over the stored authorization record
+                        # so the NA POC is grounded in actual persisted facts.
+                        if applicability_command_result is None:
+                            applicability_command_result = self._run_applicability_probe(
+                                assessment_root, assessment, testcase
+                            )
+                            applicability_command_is_new = True
+                            applicability_poc_condition = "Scope_Applicability_Observation"
                     if decision.state == "APPLICABLE":
                         applicable_count += 1
                         command_result = self._execute_target(target, testcase.id, cancel)
@@ -563,6 +957,49 @@ class AssessmentManager:
                             classification,
                             cancel,
                         )
+                    if (
+                        decision.state == "APPLICABLE"
+                        and classification.final_verdict is None
+                        and target["kind"] != "fixture"
+                        and target["id"] in discovery
+                    ):
+                        udp_gate = external_udp_accessibility_gate(
+                            testcase.id,
+                            discovery[target["id"]],
+                            assessment_type=assessment["assessment_type"],
+                        )
+                        if udp_gate is not None:
+                            decision = replace(decision, state=udp_gate[0], reason=udp_gate[1], missing=())
+                            gate = udp_gate
+                            applicable_count = max(0, applicable_count - 1)
+                            result_status = "NA"
+                            classification = SimpleNamespace(
+                                status="NA",
+                                applicability=udp_gate[1],
+                                conditions_tested=(testcase.condition,),
+                                conditions_confirmed=(),
+                                conditions_not_found=(),
+                                inconclusive_conditions=(),
+                                severity="informational",
+                                failure_reason=None,
+                                validation_state="APPLICABILITY_CONFIRMED",
+                                final_verdict="NA",
+                                coverage_status="COMPLETED",
+                                coverage_reason=udp_gate[1],
+                                observation_type="coverage",
+                                reportable_finding=False,
+                            )
+                            protocol = "udp"
+                            applicability_command_result = self._recorded_discovery_result(
+                                assessment_root, target, protocol
+                            )
+                            applicability_poc_condition = "UDP_Accessibility_Observation"
+                            discovery_root = assessment_root / self._target_dir_name(target) / "discovery"
+                            related_evidence_paths = tuple(
+                                str(path.relative_to(assessment_root))
+                                for path in sorted(discovery_root.rglob("*"))
+                                if path.is_file() and not path.is_symlink()
+                            )
                     description_line_1, description_line_2 = two_line_description(
                         testcase_id=testcase.id,
                         testcase_name=testcase.name,
@@ -649,11 +1086,14 @@ class AssessmentManager:
                             description_line_1=description_line_1,
                             description_line_2=description_line_2,
                             related_evidence_paths=related_evidence_paths,
+                            command_result=applicability_command_result,
+                            poc_condition=applicability_poc_condition,
                         )
                         if result_status == "INCONCLUSIVE":
                             error_count += 1
                     finding_ids = [f"finding-{assessment_id}-{target['id']}-{testcase.id}"] if classification.reportable_finding else []
-                    evidence_id = f"evidence-{command_result.id if command_result else uuid.uuid4().hex[:12]}"
+                    evidence_source = command_result or applicability_command_result
+                    evidence_id = f"evidence-{evidence_source.id if evidence_source else uuid.uuid4().hex[:12]}"
                     result_row = {
                         "assessment_id": assessment_id,
                         "target_id": target["id"],
@@ -678,11 +1118,11 @@ class AssessmentManager:
                         "finding_ids_json": finding_ids,
                         "evidence_paths_json": artifact["evidence_paths"],
                         "poc_paths_json": artifact["poc_paths"],
-                        "tools_used_json": list(dict.fromkeys(list(testcase.required_tools) + ([command_result.argv[0]] if command_result else []))),
+                        "tools_used_json": list(dict.fromkeys(list(testcase.required_tools) + ([evidence_source.argv[0]] if evidence_source else []))),
                         "validation_state": classification.validation_state,
                         "failure_reason": classification.failure_reason,
                         "evidence_id": evidence_id,
-                        "command": command_result.displayed_command if command_result else None,
+                        "command": evidence_source.displayed_command if evidence_source else None,
                         "output_preview": artifact["stdout_preview"],
                         "created_at": now_iso(),
                     }
@@ -720,6 +1160,27 @@ class AssessmentManager:
                             "combined_sha256": command_result.combined_sha256,
                             "execution_status": command_result.status,
                         })
+                    if applicability_command_is_new and applicability_command_result is not None:
+                        self.db.add_execution({
+                            "id": applicability_command_result.id,
+                            "assessment_id": assessment_id,
+                            "target_id": target["id"],
+                            "testcase_id": testcase.id,
+                            "command_json": json.dumps(list(applicability_command_result.argv)),
+                            "displayed_command": applicability_command_result.displayed_command,
+                            "cwd": applicability_command_result.cwd,
+                            "started_at": applicability_command_result.started_at,
+                            "ended_at": applicability_command_result.ended_at,
+                            "exit_code": applicability_command_result.exit_code,
+                            "timed_out": int(applicability_command_result.timed_out),
+                            "tool_version": applicability_command_result.tool_version,
+                            "stdout_path": artifact["evidence_paths"][0],
+                            "stderr_path": artifact["evidence_paths"][1],
+                            "stdout_sha256": applicability_command_result.stdout_sha256,
+                            "stderr_sha256": applicability_command_result.stderr_sha256,
+                            "combined_sha256": applicability_command_result.combined_sha256,
+                            "execution_status": applicability_command_result.status,
+                        })
                     if recovery_attempts:
                         recovery_root = (
                             assessment_root
@@ -755,7 +1216,7 @@ class AssessmentManager:
                     for relative in artifact["evidence_paths"] + artifact["poc_paths"]:
                         artifact_path = assessment_root / relative
                         self.db.add_evidence({
-                            "id": f"{evidence_id}-{sha256_bytes(relative.encode())[:10]}",
+                            "id": f"{evidence_id}-{result_id}-{sha256_bytes(relative.encode())[:10]}",
                             "result_id": result_id,
                             "assessment_id": assessment_id,
                             "target_id": target["id"],
@@ -780,7 +1241,7 @@ class AssessmentManager:
                         target_id=target["id"],
                         completed_units=completed,
                         total_units=assessment["total_units"],
-                        payload={"command": command_result.displayed_command if command_result else None, "output_preview": artifact["stdout_preview"], "evidence_paths": artifact["evidence_paths"], "poc_paths": artifact["poc_paths"], "failure_reason": classification.failure_reason, "applicability_state": decision.state},
+                        payload={"command": evidence_source.displayed_command if evidence_source else None, "output_preview": artifact["stdout_preview"], "evidence_paths": artifact["evidence_paths"], "poc_paths": artifact["poc_paths"], "failure_reason": classification.failure_reason, "applicability_state": decision.state},
                     )
                 if cancel.is_set():
                     break
@@ -873,15 +1334,34 @@ class AssessmentManager:
                 target_id=target["id"],
             )
             return command_result, classification, [], []
+        raw_output = command_result.combined_output.decode("utf-8", errors="replace") if command_result else ""
+        if command_result is not None and command_result.timed_out:
+            # Preserve the complete stdout/stderr in the execution record, but
+            # do not ask a small local model to reproduce a long partial
+            # startup stream.  Timeout recovery is determined from the typed
+            # execution facts; hashes and byte counts keep provenance visible.
+            raw_diagnostic = (
+                f"raw_output_omitted_from_prompt=true\n"
+                f"raw_output_bytes={len(command_result.combined_output)}\n"
+                "raw_output_hash_present=true"
+            )
+        else:
+            raw_diagnostic = raw_output[:2400]
+        failure_summary = "bounded command timeout" if command_result is not None and command_result.timed_out else trigger.splitlines()[0][:500]
         evidence = "\n".join(
             part for part in (
                 f"target={target['value']}",
-                f"testcase={testcase.id} {testcase.name}",
+                f"testcase={testcase.id} {testcase.name.encode('ascii', errors='ignore').decode('ascii')}",
                 f"command={command_result.displayed_command if command_result else 'none'}",
                 f"exit_code={command_result.exit_code if command_result else None}",
                 f"execution_status={command_result.status if command_result else 'not executed'}",
-                f"failure_reason={trigger}",
-                command_result.combined_output.decode("utf-8", errors="replace") if command_result else "",
+                # Failure reasons may already include an output excerpt.  Keep
+                # the diagnostic summary single-line and attach the preserved
+                # raw output separately so the model does not receive
+                # duplicated scanner text that can destabilize small local
+                # structured-output models.
+                f"failure_reason={failure_summary}",
+                raw_diagnostic,
             ) if part
         )[:6000]
         audits: list[dict[str, object]] = []
@@ -903,11 +1383,35 @@ class AssessmentManager:
                 cache_key = sha256_bytes(evidence.encode("utf-8", errors="replace"))
                 triage = self._ai_cache.get(cache_key)
                 if triage is None:
-                    triage = self.ollama.triage(
-                        testcase_id=testcase.id,
-                        observation_ids=list(getattr(classification, "observation_ids", ())),
-                        evidence=evidence,
-                    )
+                    observation_ids = list(getattr(classification, "observation_ids", ()))
+                    try:
+                        triage = self.ollama.triage(
+                            testcase_id=testcase.id,
+                            observation_ids=observation_ids,
+                            evidence=evidence,
+                        )
+                    except Exception:
+                        # A small local model can fail to emit structured JSON
+                        # when a partial timeout stream is included.  One
+                        # bounded retry uses only typed execution facts; the
+                        # complete raw output remains in the immutable evidence
+                        # record and deterministic fallback remains authoritative.
+                        if command_result is None or not command_result.timed_out:
+                            raise
+                        compact_timeout_evidence = "\n".join(
+                            (
+                                f"target={target['value']}",
+                                f"testcase_id={testcase.id}",
+                                f"execution_status={command_result.status}",
+                                f"exit_code={command_result.exit_code}",
+                                "failure_reason=bounded command timeout",
+                            )
+                        )
+                        triage = self.ollama.triage(
+                            testcase_id=testcase.id,
+                            observation_ids=observation_ids,
+                            evidence=compact_timeout_evidence,
+                        )
                     self._ai_cache[cache_key] = triage
                 response_payload = triage.model_dump()
                 suggested_action_id = triage.suggested_action_id
@@ -1108,6 +1612,7 @@ class AssessmentManager:
             return None
         assessment["targets"] = self.db.get_targets(assessment_id)
         assessment["results"] = self.db.list_results(assessment_id)
+        assessment["adjudication_revisions"] = self.db.list_adjudication_revisions(assessment_id)
         assessment.update(self._result_summary(assessment["results"]))
         assessment["recent_events"] = self.db.list_events(assessment_id)[-100:]
         return assessment

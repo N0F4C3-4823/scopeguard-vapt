@@ -87,6 +87,28 @@ def two_line_description(
         return "", ""
     client_condition = _client_condition(condition)
     if verdict == "NA":
+        applicability_text = applicability.casefold()
+        if "database service" in applicability_text or "database endpoint" in applicability_text:
+            return (
+                _sentence("No supported database service was identified in the completed service inventory"),
+                _sentence("Database access testing did not apply because no database endpoint was identified from this testing position"),
+            )
+        if "NA_UNTESTABLE_FROM_EXTERNAL_VANTAGE" in applicability:
+            service_label = {
+                "01": "NTP", "06": "LDAP", "07": "NetBIOS", "09": "TFTP",
+                "10": "Telnet", "13": "SNMP", "16": "SMB network share",
+                "17": "SNMP", "18": "FTP", "20": "WebSocket or MQTT",
+                "21": "SMB", "23": "RDP", "24": "Redis", "25": "MS-SQL",
+                "30": "VPN", "34": "SSH", "36": "RPC/DCOM", "37": "VNC",
+                "39": "SSH", "40": "DNS",
+            }.get(testcase_id, client_condition)
+            if "TCP" in applicability.upper() and "FILTERED" in applicability.upper():
+                line1 = _sentence(f"The {service_label} service port was observed in a filtered state")
+                line2 = _sentence(f"{service_label} security checks could not be performed from the current external testing position")
+                return line1, line2
+            line1 = _sentence(f"The required {service_label} service did not provide a usable response during the authorized checks")
+            line2 = _sentence(f"The service-dependent {service_label} check could not be assessed from the current external testing position")
+            return line1, line2
         line1 = _sentence(f"The {client_condition} check requires {_na_requirement(condition, applicability)}")
         line2 = _sentence("The required access or capability is not available for this assessment, so this condition does not apply")
         return line1, line2
