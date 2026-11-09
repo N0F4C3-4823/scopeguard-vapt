@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN="\${PYTHON_BIN:-python3}"
-OLLAMA_MODEL="\${SCOPEGUARD_OLLAMA_MODEL:-qwen2.5:1.5b-instruct}"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+OLLAMA_MODEL="${SCOPEGUARD_OLLAMA_MODEL:-qwen2.5:1.5b-instruct}"
 OLLAMA_PID=""
 OLLAMA_STARTED=0
 
@@ -15,7 +15,7 @@ confirm() {
   local answer
   interactive || return 1
   read -r -p "$1 [y/N] " answer
-  case "\${answer,,}" in y|yes) return 0 ;; *) return 1 ;; esac
+  case "${answer,,}" in y|yes) return 0 ;; *) return 1 ;; esac
 }
 
 cleanup() {
@@ -33,9 +33,9 @@ detect_platform() {
   if [ -r /etc/os-release ]; then
     # shellcheck disable=SC1091
     . /etc/os-release
-    DISTRO_ID="\${ID:-unknown}"
-    DISTRO_VERSION="\${VERSION_ID:-unknown}"
-    DISTRO_NAME="\${PRETTY_NAME:-\$DISTRO_ID}"
+    DISTRO_ID="${ID:-unknown}"
+    DISTRO_VERSION="${VERSION_ID:-unknown}"
+    DISTRO_NAME="${PRETTY_NAME:-\$DISTRO_ID}"
   fi
   ARCH="$(uname -m)"
   PACKAGE_MANAGER=""
@@ -52,7 +52,7 @@ print_environment() {
   say "ScopeGuard VAPT installer (v1.0.0-beta.1)"
   say "Distribution: $DISTRO_NAME ($DISTRO_ID $DISTRO_VERSION)"
   say "Architecture: $ARCH"
-  say "Package manager: \${PACKAGE_MANAGER:-not detected}"
+  say "Package manager: ${PACKAGE_MANAGER:-not detected}"
   say "WSL: $([ "$WSL" = 1 ] && echo detected || echo not-detected)"
   say "systemd: $([ "$SYSTEMD" = 1 ] && echo available || echo unavailable)"
   if command -v "$PYTHON_BIN" >/dev/null 2>&1; then say "Python: $($PYTHON_BIN --version 2>&1)"; else say "Python: not found"; fi
@@ -80,15 +80,15 @@ run_privileged() {
 install_system_packages() {
   [ -n "$PACKAGE_MANAGER" ] || die "No supported package manager was detected. Install Python 3.11+, curl, nmap, openssl, dig, and zstd using your distribution."
   mapfile -t packages < <(package_names)
-  say "Requested system packages: \${packages[*]}"
-  if [ "\${SCOPEGUARD_INSTALL_SYSTEM_PACKAGES:-0}" != 1 ] && ! confirm "Install missing system packages now?"; then
+  say "Requested system packages: ${packages[*]}"
+  if [ "${SCOPEGUARD_INSTALL_SYSTEM_PACKAGES:-0}" != 1 ] && ! confirm "Install missing system packages now?"; then
     die "System dependencies are missing. Re-run with SCOPEGUARD_INSTALL_SYSTEM_PACKAGES=1 or install them manually."
   fi
   case "$PACKAGE_MANAGER" in
-    apt-get) run_privileged apt-get update; run_privileged apt-get install -y "\${packages[@]}" ;;
-    dnf|yum) run_privileged "$PACKAGE_MANAGER" install -y "\${packages[@]}" ;;
-    pacman) run_privileged pacman -Sy --needed --noconfirm "\${packages[@]}" ;;
-    zypper) run_privileged zypper --non-interactive install --no-confirm "\${packages[@]}" ;;
+    apt-get) run_privileged apt-get update; run_privileged apt-get install -y "${packages[@]}" ;;
+    dnf|yum) run_privileged "$PACKAGE_MANAGER" install -y "${packages[@]}" ;;
+    pacman) run_privileged pacman -Sy --needed --noconfirm "${packages[@]}" ;;
+    zypper) run_privileged zypper --non-interactive install --no-confirm "${packages[@]}" ;;
   esac
 }
 
@@ -108,9 +108,9 @@ PY
 check_optional_tools() {
   local missing=()
   for tool in curl nmap openssl dig zstd; do command -v "$tool" >/dev/null 2>&1 || missing+=("$tool"); done
-  if [ "\${#missing[@]}" -gt 0 ]; then
-    warn "Scanner-support tools missing: \${missing[*]}"
-    if [ "\${SCOPEGUARD_INSTALL_SYSTEM_PACKAGES:-0}" = 1 ] || confirm "Install scanner-support tools now?"; then
+  if [ "${#missing[@]}" -gt 0 ]; then
+    warn "Scanner-support tools missing: ${missing[*]}"
+    if [ "${SCOPEGUARD_INSTALL_SYSTEM_PACKAGES:-0}" = 1 ] || confirm "Install scanner-support tools now?"; then
       install_system_packages
     else
       warn "Checks requiring missing tools will remain INCONCLUSIVE or unavailable."
@@ -144,15 +144,15 @@ install_local_ollama() {
 }
 
 ollama_health() {
-  curl --fail --silent --show-error --max-time 2 "\${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1
+  curl --fail --silent --show-error --max-time 2 "${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1
 }
 
 start_ollama() {
   local binary="$1"
   if ollama_health; then return 0; fi
-  mkdir -p "\${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" "$ROOT_DIR/data/logs"
-  OLLAMA_HOST="\${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}" \\
-    OLLAMA_MODELS="\${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" \\
+  mkdir -p "${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" "$ROOT_DIR/data/logs"
+  OLLAMA_HOST="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}" \
+    OLLAMA_MODELS="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" \
     OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 "$binary" serve >"$ROOT_DIR/data/logs/ollama-install.log" 2>&1 &
   OLLAMA_PID=$!
   OLLAMA_STARTED=1
@@ -161,7 +161,7 @@ start_ollama() {
 }
 
 verify_ollama_model() {
-  MODEL="$1" URL="\${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}/api/generate" "$PYTHON_BIN" - <<'PY'
+  MODEL="$1" URL="${SCOPEGUARD_OLLAMA_URL:-http://127.0.0.1:11434}/api/generate" "$PYTHON_BIN" - <<'PY'
 import json, os, urllib.request
 payload = json.dumps({"model": os.environ["MODEL"], "prompt": "Return the single word READY.", "stream": False, "options": {"num_ctx": 512, "temperature": 0}}).encode()
 request = urllib.request.Request(os.environ["URL"], data=payload, headers={"Content-Type": "application/json"})
@@ -174,7 +174,7 @@ PY
 prepare_ollama() {
   local binary
   binary="$(ollama_binary)"
-  if [ -z "$binary" ] && { [ "\${SCOPEGUARD_INSTALL_OLLAMA:-0}" = 1 ] || [ "\${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ]; }; then
+  if [ -z "$binary" ] && { [ "${SCOPEGUARD_INSTALL_OLLAMA:-0}" = 1 ] || [ "${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ]; }; then
     install_local_ollama
     binary="$(ollama_binary)"
   elif [ -z "$binary" ] && interactive && confirm "Install project-local Ollama for optional local AI?"; then
@@ -183,10 +183,10 @@ prepare_ollama() {
   fi
   if [ -z "$binary" ]; then warn "Ollama is not installed; continuing without optional local AI."; return 0; fi
   say "Ollama runtime: $binary"
-  if [ "\${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ] || { interactive && confirm "Download $OLLAMA_MODEL?"; }; then
+  if [ "${SCOPEGUARD_INSTALL_OLLAMA_MODEL:-0}" = 1 ] || { interactive && confirm "Download $OLLAMA_MODEL?"; }; then
     start_ollama "$binary"
     say "Pulling model $OLLAMA_MODEL."
-    OLLAMA_MODELS="\${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" "$binary" pull "$OLLAMA_MODEL"
+    OLLAMA_MODELS="${OLLAMA_MODELS:-$ROOT_DIR/data/ollama}" "$binary" pull "$OLLAMA_MODEL"
     verify_ollama_model "$OLLAMA_MODEL"
   fi
 }
@@ -204,7 +204,7 @@ fi
 source "$ROOT_DIR/.venv/bin/activate"
 python -m pip install --upgrade pip
 python -m pip install --requirement "$ROOT_DIR/requirements.txt"
-if [ "\${SCOPEGUARD_INSTALL_DEV:-0}" = 1 ]; then python -m pip install --requirement "$ROOT_DIR/requirements-dev.txt"; fi
+if [ "${SCOPEGUARD_INSTALL_DEV:-0}" = 1 ]; then python -m pip install --requirement "$ROOT_DIR/requirements-dev.txt"; fi
 python -m pip install --no-deps --editable "$ROOT_DIR"
 mkdir -p "$ROOT_DIR/data"
 if [ ! -f "$ROOT_DIR/.env" ]; then cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"; fi
