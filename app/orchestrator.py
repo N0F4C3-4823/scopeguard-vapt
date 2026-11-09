@@ -35,6 +35,28 @@ class AssessmentManager:
         self.active_commands = 0
         self.max_active_commands = 0
         self.executed_commands = 0
+        self._reconcile_interrupted_assessments()
+
+    def _reconcile_interrupted_assessments(self) -> None:
+        """Fail closed for jobs left active when the backend process stopped."""
+        for assessment in self.db.list_assessments():
+            if assessment.get("status") not in {"QUEUED", "RUNNING", "PAUSED"}:
+                continue
+            assessment_id = assessment["id"]
+            self.db.update_assessment(
+                assessment_id,
+                status="FAILED",
+                completed_at=now_iso(),
+                current_phase="Recovery",
+            )
+            self.db.add_event(
+                assessment_id,
+                "assessment_interrupted",
+                "Recovery",
+                "Assessment was interrupted by a backend restart; incomplete checks remain unresolved.",
+                status="FAILED",
+                payload={"reason": "backend_restart"},
+            )
 
     def create(self, payload: AssessmentCreate) -> dict:
         if not payload.authorized:

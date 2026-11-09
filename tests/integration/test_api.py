@@ -114,6 +114,30 @@ def test_api_does_not_delete_active_assessment(application):
     client.post(f"/api/assessments/{assessment_id}/cancel")
 
 
+def test_api_reconciles_persisted_active_assessment_after_restart(application):
+    client = TestClient(application)
+    response = client.post(
+        "/api/assessments",
+        json={
+            "name": "Interrupted assessment recovery",
+            "targets": ["fixture://negative"],
+            "authorized": True,
+            "profile": "controlled_fixture",
+        },
+    )
+    assessment_id = response.json()["id"]
+    application.state.db.update_assessment(assessment_id, status="RUNNING")
+
+    from app.orchestrator import AssessmentManager
+
+    AssessmentManager(application.state.db, application.state.settings)
+
+    recovered = client.get(f"/api/assessments/{assessment_id}")
+    assert recovered.status_code == 200
+    assert recovered.json()["status"] == "FAILED"
+    assert recovered.json()["current_phase"] == "Recovery"
+
+
 def test_api_exposes_complete_machine_readable_live_capability_matrix(application):
     client = TestClient(application)
     response = client.get("/api/capability-matrix")
